@@ -2,16 +2,27 @@ module Globber (matchGlob) where
 
 type GlobPattern = String
 
-newtype Match = Match { match:: String -> Bool }
+data Match = Literal Char | Escape Char | Set [Char] |
+             Single | Any
 
-literal :: String -> Match
-literal s = let
-  escape (x:xs) = case x of
-    '\\' -> (head xs) : (escape (tail xs))
-    _ -> x : (escape xs)
-  escape [] = []
-  in Match $ \i -> i == (escape s)
+indexOf :: (Ord a) -> a -> [a] -> Maybe Int
+indexOf x xs = case filter ((==x) . fst) (zip xs [0..]) of
+                 [] -> Nothing
+                 r -> Just $ snd $ head r
+
+setElem :: String -> ([Char], String)
+setElem str = case indexOf '-' of
+                Just x ->
+
+parsePattern :: String -> [Match]
+parsePattern (x:xs) =
+  case x of
+  '\\' -> (Escape (head xs)) : (parsePattern $ tail xs)
+  '?' -> Single
+  '*' -> Any
+  '[' ->
+  _ -> (Literal x) : (parsePattern xs)
+parsePattern [] = []
 
 matchGlob :: GlobPattern -> String -> Bool
 matchGlob _ _ = False
-
