@@ -119,5 +119,3 @@ readChan (Chan r _) =
 
 main :: IO ()
 main = undefined
-
-withClient

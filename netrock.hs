@@ -1,4 +1,5 @@
 module Main where
+import Control.Concurrent
 import Control.Exception
 import Network
 import System.IO
@@ -38,12 +39,20 @@ withTty :: (Handle -> IO a) -> IO a
 withTty = withFile "/dev/tty" ReadWriteMode
 
 withClient :: PortID -> (Handle -> IO a) -> IO a
-withClient listenPort fn = do
-  -- XXX here is where you must accept a TCP connection and call fn on it
+withClient listenPort fn =
   bracket (listenOn listenPort) sClose $ \s -> do
-    bracket (accept s) (\(h,_,_) -> hClose h) $ \(h, n, p) -> do
-      putStrLn $ "Connect from " ++ show n ++ " on port " ++ show p
-      fn h
+    bracket (accept s) (\(h, _, _) -> hClose h) $
+      \(h, host, port) -> do
+        putStrLn $ "Connection from host " ++ host ++ " port " ++ show port
+        fn h
+
+-- You may find defining this function useful
+play :: MVar Move -> MVar Move -> (Handle, HostName, PortNumber) -> IO ()
+play myMoveMVar opponentMoveMVar (h, host, port) = undefined
+
+-- You should define this function
+netrock :: PortID -> IO ()
+netrock listenPort = undefined
 
 main :: IO ()
-main = withClient (PortNumber 1617) (computerVsUser Rock)
+main = netrock (PortNumber 1617)
