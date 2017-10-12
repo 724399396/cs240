@@ -18,3 +18,20 @@ seqTest1 = infiniteLoop `seq` "Hello" -- loops forever
 
 seqTest2 = str `seq` length str
            where str = infiniteLoop:"Hello" -- return 6
+
+data IntWrapper = IntWrapper !Int
+
+f ('a' : 'b' : rest) = rest
+f _                  = "ok"
+
+newtype NTInt = NTInt Int deriving (Show)
+data SInt = SInt !Int deriving (Show)
+
+uNTInt = NTInt undefined
+uSInt = SInt undefined
+
+testNT = case uNTInt of NTInt _ -> True
+
+testS = case uSInt of SInt _ -> True
+
+data TwoInts = TwoInts {-# UNPACk #-} !Int {-# UNPACK #-} !Int
