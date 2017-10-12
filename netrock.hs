@@ -48,11 +48,28 @@ withClient listenPort fn =
 
 -- You may find defining this function useful
 play :: MVar Move -> MVar Move -> (Handle, HostName, PortNumber) -> IO ()
-play myMoveMVar opponentMoveMVar (h, host, port) = undefined
+play myMoveMVar opponentMoveMVar (h, host, port) = do
+  putStrLn $ "Connection from host " ++ host ++ " port " ++ show port
+  myMove <- getMove h
+  putMVar myMoveMVar myMove
+  opponentMove <- takeMVar opponentMoveMVar
+  let o = outcome myMove opponentMove
+  hPutStrLn h $ "You " ++ show o
 
 -- You should define this function
 netrock :: PortID -> IO ()
-netrock listenPort = undefined
+netrock listenPort =
+  bracket (listenOn listenPort) sClose $ \s -> do
+    mv1 <- newEmptyMVar
+    mv2 <- newEmptyMVar
+    let cleanup mv (h,_,_) = do
+          tryPutMVar mv (error "smething blwe up")
+          hClose h
+    wait <- newEmptyMVar
+    forkIO $ bracket (accept s) (cleanup mv1) (play mv1 mv2)
+      `finally` putMVar wait ()
+    bracket (accept s) (cleanup mv2) (play mv2 mv1)
+    takeMVar wait
 
 main :: IO ()
 main = netrock (PortNumber 1617)

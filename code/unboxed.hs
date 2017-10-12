@@ -1,0 +1,20 @@
+{-# LANGUAGE MagicHash #-}
+import GHC.Prim
+
+data FastPoint = FastPoint Double# Double#
+
+fp = FastPoint 2.0## 2.0##
+
+-- Error: can't pass unboxed type to polymorphic function
+-- fp' = FastPoint 2.0## (id 2.0##)
+
+-- Error: can't use unboxed type as type parameter
+-- notInt :: Maybe Int#
+-- notInt = Nothing
+
+infiniteLoop = infiniteLoop :: Char
+
+seqTest1 = infiniteLoop `seq` "Hello" -- loops forever
+
+seqTest2 = str `seq` length str
+           where str = infiniteLoop:"Hello" -- return 6
