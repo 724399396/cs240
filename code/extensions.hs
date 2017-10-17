@@ -1,3 +1,5 @@
+import Control.Concurrent
+
 class MonadTrans t where
   lift :: Monad m => m a -> t m a
 
@@ -66,6 +68,29 @@ oneTwo' = (fst y, snd x)
 nthFib' :: Int -> Integer
 nthFib' n = fibList !! n
   where fibList = fix $ \l -> 1 : 1 : zipWith (+) l (tail l)
+
+class Monad m => MonadFix m where
+  mfix :: (a -> m a) -> m a
+
+mfib :: (MonadFix m) => Int -> m Integer
+mfib n = do
+  fibList <- mfix $ \l -> return $ 1 : 1 : zipWith (+) l (tail l)
+  return $ fibList !! n
+
+oneTwo'' :: (MonadFix m) => m (Int, Int)
+oneTwo'' = do
+  (x,y) <- mfix $ \ ~(x0, y0) -> do x1 <- return (1, snd y0)
+                                    y1 <- return (fst x0, 2)
+                                    return (x1, y1)
+  return (fst y, snd x)
+
+data Link a = Link !a !(MVar (Link a))
+
+mkCycle :: IO (MVar (Link Int))
+mkCycle = do
+  rec l1 <- newMVar $ Link 1 l2
+      l2 <- newMVar $ Link 2 l1
+  return l1
 
 main :: IO ()
 main = runStateT go 0 >>= print
