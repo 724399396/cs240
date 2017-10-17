@@ -1,3 +1,6 @@
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE RecursiveDo #-}
+
 import Control.Concurrent
 
 class MonadTrans t where
@@ -91,6 +94,19 @@ mkCycle = do
   rec l1 <- newMVar $ Link 1 l2
       l2 <- newMVar $ Link 2 l1
   return l1
+
+newtype Identity a = Identity { runIdentity :: a } deriving (Functor)
+
+instance Applicative Identity where
+  pure = return
+  af <*> ax = Identity $ (runIdentity af) (runIdentity ax)
+
+instance Monad Identity where
+  return = Identity
+  m >>= k = k (runIdentity m)
+
+instance MonadFix Identity where
+  mfix f = let x = f (runIdentity x) in x
 
 main :: IO ()
 main = runStateT go 0 >>= print
