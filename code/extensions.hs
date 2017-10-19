@@ -1,7 +1,12 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RecursiveDo #-}
 
 import Control.Concurrent
+import System.IO.Unsafe
+import Data.IORef
+import Control.Exception
 
 class MonadTrans t where
   lift :: Monad m => m a -> t m a
@@ -107,6 +112,37 @@ instance Monad Identity where
 
 instance MonadFix Identity where
   mfix f = let x = f (runIdentity x) in x
+
+weird :: IO String
+weird = do
+  xxx <- unsafeInterleaveIO $ do putStrLn "Gotcha!"; return []
+  return $ 'a':'b':'c':xxx
+
+fixIO :: (a -> IO a) -> IO a
+fixIO k = do
+  ref <- newIORef (throw NonTermination)
+  ans <- unsafeInterleaveIO (readIORef ref)
+  result <- k ans
+  writeIORef ref result
+  return result
+
+mbroken :: (Monad m) => (a -> m a) -> m a
+mbroken f = fix (>>= f)
+
+instance MonadFix m => MonadFix (StateT s m) where
+  mfix f = StateT $ \s -> mfix $ \ ~(a, _) -> runStateT (f a) s
+
+class Convert a b where convert :: a -> b
+instance Convert Int Bool where convert = (/= 0)
+instance Convert Int Integer where convert = toInteger
+instance (Convert a b) => Convert [a] [b] where
+  convert = map convert
+
+instance Convert Int [Char] where convert = show
+instance Convert a a where convert a = a
+
+class MyShow a where myShow :: a -> String
+instance MyShow Char where my
 
 main :: IO ()
 main = runStateT go 0 >>= print
