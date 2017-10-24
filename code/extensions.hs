@@ -2,6 +2,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE RecursiveDo #-}
+{-# LANGUAGE OverlappingInstances #-}
 
 import Control.Concurrent
 import System.IO.Unsafe
@@ -70,7 +71,7 @@ fix f = let x = f x in x
 oneTwo' :: (Int, Int)
 oneTwo' = (fst y, snd x)
   where (x, y) = fix $ \ ~(x0,y0) -> let x1 = (1, snd y0)
-                                         y1 = (fst x1, 2)
+                                         y1 = (fst x0, 2)
                                      in (x1, y1)
 
 nthFib' :: Int -> Integer
@@ -142,7 +143,14 @@ instance Convert Int [Char] where convert = show
 instance Convert a a where convert a = a
 
 class MyShow a where myShow :: a -> String
-instance MyShow Char where my
+instance MyShow Char where myShow = show
+instance MyShow Int where myShow = show
+instance MyShow [Char] where myShow = id
+instance (MyShow a) => MyShow [a] where
+  myShow []     = "[]"
+  myShow (x:xs) = "[" ++ myShow x ++ go xs
+    where go (y:ys)    = "," ++ myShow y ++ go ys
+          go []        = "]"
 
 main :: IO ()
 main = runStateT go 0 >>= print
