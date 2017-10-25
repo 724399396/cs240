@@ -1,10 +1,10 @@
 {-# LANGUAGE DeriveDataTypeable #-}
-import Prelude
-import Control.Exception
-import Data.Typeable
-import Control.Concurrent hiding (modifyMVar, Chan)
-import Data.Time.Clock
-import Control.Monad
+import           Control.Concurrent hiding (Chan, modifyMVar)
+import           Control.Exception
+import           Control.Monad
+import           Data.Time.Clock
+import           Data.Typeable
+import           Prelude
 
 data MyError = MyError String deriving (Show, Typeable)
 instance Exception MyError
@@ -18,7 +18,7 @@ pureCatcher a = (a `seq` return (Just a))
                 `catch` \(SomeException _) -> return Nothing
 
 seqList :: [a] -> b -> b
-seqList [] b = b
+seqList [] b     = b
 seqList (x:xs) b = x `seq` seqList xs b
 
 data TimeOut = TimeOut UTCTime deriving (Eq, Show, Typeable)
@@ -88,7 +88,7 @@ cond_wait m (Cond waiters) = do
 
 cond_signal, cond_broadcast :: Cond -> IO ()
 cond_signal (Cond waiters) = modifyMVar_ waiters wakeone
-  where wakeone [] = return []
+  where wakeone []     = return []
         wakeone (w:ws) = putMVar w () >> return ws
 
 cond_broadcast (Cond waiters) = modifyMVar_ waiters wakeall

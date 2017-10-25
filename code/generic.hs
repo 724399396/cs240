@@ -1,12 +1,12 @@
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE DeriveDataTypeable     #-}
+{-# LANGUAGE FlexibleInstances      #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE MultiParamTypeClasses  #-}
 
-import Data.Typeable hiding (cast)
-import Data.Data hiding (cast)
-import Unsafe.Coerce
-import Data.Function
+import           Data.Data     hiding (cast)
+import           Data.Function
+import           Data.Typeable hiding (cast)
+import           Unsafe.Coerce
 
 pairToStringList :: (Show a, Show b) => (a, b) -> [String]
 pairToStringList (a, b) = [show a, show b]
@@ -53,3 +53,31 @@ cast :: (Typeable a, Typeable b) => a -> Maybe b
 cast a = fix $ \ ~(Just b) -> if typeOf a == typeOf b
                                  then Just $ unsafeCoerce a
                                  else Nothing
+
+mkT :: (Typeable a, Typeable b) => (b -> b) -> a -> a
+mkT f a = case cast f of Just g  -> g a
+                         Nothing -> a
+
+newtype Salary = Salary Double deriving (Show, Data, Typeable)
+
+raiseSalary :: (Typeable a) => a -> a
+raiseSalary = mkT $ \(Salary s) -> Salary (s * 1.04)
+
+mkQ :: (Typeable a, Typeable b) => r -> (b -> r) -> a -> r
+mkQ defaultVal fn a = case cast a of Just b  -> fn b
+                                     Nothing -> defaultVal
+
+salaryVal :: Typeable a => a -> Double
+salaryVal = mkQ 0 $ \(Salary s) -> s
+
+extQ :: (Typeable a, Typeable b) =>
+        (a -> r) -> (b -> r) -> a -> r
+extQ q f a = case cast a of
+               Just b -> f b
+               Nothing -> q a
+
+myShow :: Typeable a => a -> String
+myShow = mkQ "unknown type" (show :: Int -> String)
+         `extQ` (show :: Bool -> String)
+         `extQ` (show :: Integer -> String)
+         `extQ` (const "no floating point" :: Double -> String)
