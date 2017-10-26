@@ -4,3 +4,4 @@ cabal.sandbox.config
 *.exe
 *.hi
 *.o
+code/target
