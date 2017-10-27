@@ -30,11 +30,9 @@ receiveConnect :: Socket -> UserName -> MVar [Handle] -> IO ()
 receiveConnect s userName handles = flip catch (\(SomeException _) -> return ())
   $ do h <- socketToHandle s ReadWriteMode
        modifyMVar_ handles (return . (h:))
-       hs <- takeMVar handles
-       forM_ hs (flip hPutStrLn $ show userName ++ " has joined.")
+       withMVar handles $ mapM_ (flip hPutStrLn $ show userName ++ " has joined.")
        forever $ do inp <- hGetLine h
-                    takeMVar handles >>= mapM_ (flip hPutStrLn $ show userName ++ ": " ++ inp) . filter (/=h)
-
+                    withMVar handles $ mapM_ (flip hPutStrLn $ show userName ++ ": " ++ inp) . filter (/=h)
 
 -- | Chat server entry point.
 chat :: IO ()
