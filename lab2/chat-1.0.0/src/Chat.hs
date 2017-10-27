@@ -17,7 +17,7 @@ tcpListenOn = do
   addr:_ <- getAddrInfo (Just hints) (Just "0.0.0.0") (Just port)
   s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
   bind s (addrAddress addr)
-  listen s 5
+  listen s 1
   return s
 
 userNameStart :: UserName
@@ -27,14 +27,13 @@ chooseUserName :: MVar UserName -> IO UserName
 chooseUserName mi = modifyMVar mi $ \prev -> return (prev+1, prev)
 
 receiveConnect :: Socket -> UserName -> MVar [Handle] -> IO ()
-receiveConnect s userName handles = bracket (socketToHandle s ReadWriteMode) hClose
-                           $ \h -> do modifyMVar_ handles (\hs -> return $ h:hs)
-                                      hs <- takeMVar handles
-                                      forM_ hs (flip hPutStrLn $ show userName ++ " has joined.")
-                                      _ <- forkIO $ forever $
-                                           do inp <- hGetLine h
-                                              takeMVar handles >>= mapM_ (flip hPutStrLn $ show userName ++ ": " ++ inp) . filter (/=h)
-                                      return ()
+receiveConnect s userName handles = flip catch (\(SomeException _) -> return ())
+  $ do h <- socketToHandle s ReadWriteMode
+       modifyMVar_ handles (return . (h:))
+       hs <- takeMVar handles
+       forM_ hs (flip hPutStrLn $ show userName ++ " has joined.")
+       forever $ do inp <- hGetLine h
+                    takeMVar handles >>= mapM_ (flip hPutStrLn $ show userName ++ ": " ++ inp) . filter (/=h)
 
 
 -- | Chat server entry point.
@@ -44,5 +43,5 @@ chat = do
   uNameM <- newMVar userNameStart
   handlesM <- newMVar []
   forever $ do (ns, _) <- accept s
-               uName <- chooseUserName uNameM
-               receiveConnect ns uName handlesM
+               forkIO $ do uName <- chooseUserName uNameM
+                           receiveConnect ns uName handlesM
