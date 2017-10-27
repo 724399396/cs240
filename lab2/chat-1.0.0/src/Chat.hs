@@ -26,10 +26,14 @@ userNameStart = 1
 chooseUserName :: MVar UserName -> IO UserName
 chooseUserName mi = modifyMVar mi $ \prev -> return (prev+1, prev)
 
-receiveConnect :: Socket -> UserName -> MVar [Handle] -> IO ()
-receiveConnect s userName handles = flip catch (\(SomeException _) -> return ())
-  $ do h <- socketToHandle s ReadWriteMode
-       modifyMVar_ handles (return . (h:))
+handleLeave :: UserName -> Handle -> MVar [Handle] -> IO ()
+handleLeave userName h mhs = do
+  modifyMVar_ mhs $ return . filter (/= h)
+  withMVar mhs $ mapM_ (flip hPutStrLn $ show userName ++ " has leave.")
+
+receiveConnect :: Handle -> UserName -> MVar [Handle] -> IO ()
+receiveConnect h userName handles = flip catch (\(SomeException _) -> handleLeave userName h handles)
+  $ do modifyMVar_ handles (return . (h:))
        withMVar handles $ mapM_ (flip hPutStrLn $ show userName ++ " has joined.")
        forever $ do inp <- hGetLine h
                     withMVar handles $ mapM_ (flip hPutStrLn $ show userName ++ ": " ++ inp) . filter (/=h)
@@ -42,4 +46,5 @@ chat = do
   handlesM <- newMVar []
   forever $ do (ns, _) <- accept s
                forkIO $ do uName <- chooseUserName uNameM
-                           receiveConnect ns uName handlesM
+                           h <- socketToHandle ns ReadWriteMode
+                           receiveConnect h uName handlesM
