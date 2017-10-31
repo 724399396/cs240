@@ -1,6 +1,7 @@
 import System.IO (isEOF)
 import Control.Monad.Trans.Class (MonadTrans(lift))
 import Control.Monad
+import Prelude hiding ((.))
 
 data Producer a m r
   = Yield a (Producer a m r)
@@ -63,6 +64,36 @@ echo = M (isEOF >>= \eof -> return $
         else M (getLine >>= \str ->
             return $ M (putStrLn str >>= \r -> return (Return r))  >> echo ))
 
+yieldOne :: Monad m => Producer String m ()
+yieldOne = yield "Hello"
+
+yieldTwo :: Monad m => Producer String m ()
+yieldTwo = do
+  yield "Hello"
+  yield "CS240H"
+
+class Category cat where
+  (.) :: cat b c -> cat a b  -> cat a c
+  id  :: cat a a
+
+(>>>) :: Category cat => cat a b -> cat b c -> cat a c
+(>>>) = flip (.)
+
+instance Category (->) where
+  -- (.) :: (b -> c) -> (a -> b) -> (a -> c)
+  (g . f) x = g (f x)
+  id x = x
+
+(>=>) :: Monad m
+      => (a -> Producer o m b)
+      -> (b -> Producer o m c)
+      -> (a -> Producer o m c)
+(f >=> g) x = f x >>= g
+
+(~>)  :: (a -> Producer b IO ())
+      -> (b -> Producer c IO ())
+      -> (a -> Producer c IO ())
+(f ~> g) x = for (f x) g
 
 main = (isEOF >>= \eof ->
         if eof
