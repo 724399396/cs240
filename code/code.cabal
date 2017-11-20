@@ -1,0 +1,17 @@
+name:           code
+version:        1.0.0
+synopsis:       Stanford CS240h
+build-type:     Simple
+cabal-version:  >= 1.8
+
+library
+  exposed-modules:    Lib
+  build-depends:      base < 5
+                    , wai
+                    , warp
+                    , bytestring
+                    , http-types
+                    , simple
+                    , unix
+                    , postgresql-orm
+  ghc-options:        -Wall

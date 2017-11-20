@@ -8,6 +8,11 @@ data Pipe a b m r
   | M     (m   (Pipe a b m r))
   | Return r
 
+data Void
+
+type Consumer a = Pipe a Void
+type Producer b = Pipe () b
+
 await :: Pipe a b IO a
 await = Await (\a -> Return a)
 
