@@ -1,7 +1,7 @@
 module Trahs (trahs, compareHistory, compareFile, CompareResult(..)) where
 
 import           Data.List
-import           Data.Set  (fromList, toList)
+import           Data.Set             (fromList, toList)
 
 trahs :: IO ()
 trahs = return ()
