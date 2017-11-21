@@ -1,9 +1,9 @@
 module Main where
 
-import Test.Hspec
-import Test.QuickCheck
+import           Test.Hspec
+import           Test.QuickCheck
 
-import Trahs
+import           Trahs
 
 main :: IO ()
 main = hspec $ describe "Testing Lab 3" $ do
@@ -16,19 +16,19 @@ main = hspec $ describe "Testing Lab 3" $ do
 
   describe "compareHistory" $ do
     it "prefix" $ do
-      (compareHistory ["rectangle"] ["rectangle", "triangle"]) `shouldBe` Prefix
+      (compareHistory "" ["rectangle"] ["rectangle", "triangle"]) `shouldBe` ("",["rectangle", "triangle"], Prefix)
     it "postfix" $ do
-      (compareHistory ["rectangle", "triangle"] ["rectangle"]) `shouldBe` Postfix
+      (compareHistory "" ["rectangle", "triangle"] ["rectangle"]) `shouldBe` ("", ["rectangle", "triangle"], Postfix)
     it "Conflict" $ do
-      (compareHistory ["rectangle", "triangle"] ["rectangle", "start"]) `shouldBe` Conflict
+      (compareHistory "" ["rectangle", "triangle"] ["rectangle", "start"]) `shouldBe` ("", ["rectangle", "triangle"], Conflict)
     it "equal" $ property $
-      \x -> compareHistory x x == Equal
+      \x -> compareHistory "" x x == ("", x, Equal)
 
   describe "compareFile" $ do
     it "should get empty when input empty" $ do
       compareFile [] [] `shouldBe` []
     it "should get each situation" $ do
-      compareFile [("new", [""]), ("")]
+      compareFile [("new", [""]), ("prefix", ["hs1"]), ("postfix", ["hs1", "hs2"]), ("conflict", ["hs1","hs2"])] [("delete",[""]), ("prefix",["hs1", "hs2"]), ("postfix",["hs1"]), ("conflict", ["hs1", "hs3"])] `shouldBe` [("new", [""], Create), ("delete", [""], Delete), ("prefix", ["hs1", "hs2"], Prefix), ("postfix", ["hs1","hs2"], Postfix), ("conflict", ["hs1", "hs3"], Conflict)]
 
   -- example quickcheck test in hspec.
   describe "read" $ do
