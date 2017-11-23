@@ -1,20 +1,27 @@
+{-# LANGUAGE TemplateHaskell #-}
+
 module Trahs (
   trahs
 , generateReplicaId
   ) where
 
+import           Codec.Digest.SHA
+import           Control.Lens
+import           Control.Monad
+import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
-import qualified Data.Map.Strict    as Map
+import qualified Data.Map.Strict          as Map
+import           Data.Time.Clock
 import           System.Directory
 import           System.Environment
 import           System.Exit
+import           System.FilePath.Posix
 import           System.IO
 import           System.Posix.Types
+import           System.PosixCompat.Files
 import           System.Process
 import           System.Random
-import System.PosixCompat.Files
-import Control.Monad
 
 trassh :: String
 trassh = "ssh -CTaxq @ ./trahs --server"
@@ -23,15 +30,25 @@ dbFile :: FilePath
 dbFile = ".trahs.db"
 
 data FileInfo = FileInfo {
-    replicaId  :: Int64
-  , modifyTime :: EpochTime
-  , hash       :: String
+    _replicaId  :: Int64
+  , _versionId  :: Int64
+  , _modifyTime :: UTCTime
+  , _fileSize   :: Integer
+  , _hashValue  :: String
+  , _fileName   :: String
   } deriving (Show, Read)
 
+makeLenses ''FileInfo
+
+type History = Map.Map FilePath [FileInfo]
+
 data DataBase = DataBase {
-    clientReplicaId :: Int64
-  , history         :: Map.Map FilePath FileInfo
+    _clientReplicaId :: Int64
+  , _localVersionId  :: Int64
+  , _history         :: History
   } deriving (Show, Read)
+
+makeLenses ''DataBase
 
 generateReplicaId :: IO Int64
 generateReplicaId =
@@ -40,13 +57,30 @@ generateReplicaId =
 isFile :: FilePath -> IO Bool
 isFile f = isRegularFile <$> getSymbolicLinkStatus f
 
+hashFile :: FilePath -> IO String
+hashFile path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
+
+generateFileInfo :: DataBase -> FilePath -> FilePath -> IO FileInfo
+generateFileInfo db dir f = let fullFile = dir </> f
+                            in do time <- getModificationTime fullFile
+                                  size <- getFileSize fullFile
+                                  hash <- hashFile fullFile
+                                  return $ FileInfo (db^.clientReplicaId) (db^.localVersionId) time size hash f
+
+isFileChange :: FileInfo -> FileInfo -> Bool
+isFileChange (FileInfo nid _ nTime nSize nHash _) (FileInfo oid _ oTime oSize oHash _) = oTime == nTime && oSize == nSize && oHash == nHash
+
+mergeFileInfo :: FileInfo -> History -> History
+mergeFileInfo info history =
+  Map.insertWith (\_ olds -> map (\old -> if (isFileChange info old) then info else old) olds) (info^.fileName) [info] history
+
 updateLocalDb :: FilePath -> IO DataBase
 updateLocalDb dir = do
   files <- getDirectoryContents dir
-  db <- maybe (generateReplicaId >>= (\rid -> return $ DataBase rid Map.empty)) (\f -> read <$> readFile f) $ find (== dbFile) files
+  db <- maybe (generateReplicaId >>= (\rid -> return $ DataBase rid 1 Map.empty)) (fmap (over localVersionId (+1) .read) . readFile) $ find (== dbFile) files
   let watchFile = filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
-  
-  return db
+  nowFileInfos <- mapM (generateFileInfo db dir) watchFile
+  return $ over history (\h -> foldr mergeFileInfo h nowFileInfos) db
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
