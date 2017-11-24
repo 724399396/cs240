@@ -3,6 +3,8 @@
 module Trahs (
   trahs
 , generateReplicaId
+, FileInfo(..)
+, isFileChange
   ) where
 
 import           Codec.Digest.SHA
@@ -68,7 +70,7 @@ generateFileInfo db dir f = let fullFile = dir </> f
                                   return $ FileInfo (db^.clientReplicaId) (db^.localVersionId) time size hash f
 
 isFileChange :: FileInfo -> FileInfo -> Bool
-isFileChange (FileInfo nid _ nTime nSize nHash _) (FileInfo oid _ oTime oSize oHash _) = oTime == nTime && oSize == nSize && oHash == nHash
+isFileChange (FileInfo nId _ nTime nSize nHash _) (FileInfo oId _ oTime oSize oHash _) = nId == oId && (oTime /= nTime || oSize /= nSize || oHash /= nHash)
 
 mergeFileInfo :: FileInfo -> History -> History
 mergeFileInfo info history =
@@ -78,7 +80,7 @@ updateLocalDb :: FilePath -> IO DataBase
 updateLocalDb dir = do
   files <- getDirectoryContents dir
   db <- maybe (generateReplicaId >>= (\rid -> return $ DataBase rid 1 Map.empty)) (fmap (over localVersionId (+1) .read) . readFile) $ find (== dbFile) files
-  let watchFile = filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
+  watchFile <- filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
   nowFileInfos <- mapM (generateFileInfo db dir) watchFile
   return $ over history (\h -> foldr mergeFileInfo h nowFileInfos) db
 

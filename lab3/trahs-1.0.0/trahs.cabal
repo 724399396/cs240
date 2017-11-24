@@ -41,9 +41,10 @@ test-suite test-trahs
   hs-source-dirs: test
   main-is: Test.hs
   build-depends:
-    base < 5
-   ,QuickCheck > 2.5
-   ,hspec
-   ,trahs
+                base < 5
+              , QuickCheck > 2.5
+              , hspec
+              , trahs
+              , time
   ghc-options: -Wall
 
