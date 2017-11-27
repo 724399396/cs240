@@ -25,7 +25,6 @@ library
               , SHA2
               , unix-compat
               , lens
-              , time
   
   default-language: Haskell2010
   ghc-options: -Wall

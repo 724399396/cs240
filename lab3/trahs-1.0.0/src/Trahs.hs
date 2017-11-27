@@ -2,9 +2,6 @@
 
 module Trahs (
   trahs
-, generateReplicaId
-, FileInfo(..)
-, isFileChange
   ) where
 
 import           Codec.Digest.SHA
@@ -14,13 +11,11 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
-import           Data.Time.Clock
 import           System.Directory
 import           System.Environment
 import           System.Exit
 import           System.FilePath.Posix
 import           System.IO
-import           System.Posix.Types
 import           System.PosixCompat.Files
 import           System.Process
 import           System.Random
@@ -31,58 +26,44 @@ trassh = "ssh -CTaxq @ ./trahs --server"
 dbFile :: FilePath
 dbFile = ".trahs.db"
 
-data FileInfo = FileInfo {
-    _replicaId  :: Int64
-  , _versionId  :: Int64
-  , _modifyTime :: UTCTime
-  , _fileSize   :: Integer
-  , _hashValue  :: String
-  , _fileName   :: String
+type Directory = FilePath
+
+data VersionInfo = VersionInfo {
+    _replicaId :: Int64
+  , _versionId :: Int64
   } deriving (Show, Read)
 
-makeLenses ''FileInfo
+makeLenses ''VersionInfo
 
-type History = Map.Map FilePath [FileInfo]
+data FileInfo = FileInfo String deriving (Show, Read, Eq)
 
 data DataBase = DataBase {
     _clientReplicaId :: Int64
-  , _localVersionId  :: Int64
-  , _history         :: History
+  , _localVersion    :: Int64
+  , _versionInfos    :: Map.Map FilePath [VersionInfo]
+  , _fileInfos       :: Map.Map FilePath FileInfo
   } deriving (Show, Read)
 
 makeLenses ''DataBase
 
-generateReplicaId :: IO Int64
-generateReplicaId =
-  getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
+dataBase :: Directory -> IO DataBase
+dataBase dir = do files <- getDirectoryContents dir
+                  increaseVersion $ maybe initDB (fmap read . readFile) $ find (== dbFile) files
+  where
+    increaseVersion = fmap (over localVersion (+1))
+    generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
+    initDB = generateReplicaId >>= (\id -> return $ DataBase id 0 Map.empty Map.empty)
 
-isFile :: FilePath -> IO Bool
-isFile f = isRegularFile <$> getSymbolicLinkStatus f
-
-hashFile :: FilePath -> IO String
-hashFile path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
-
-generateFileInfo :: DataBase -> FilePath -> FilePath -> IO FileInfo
-generateFileInfo db dir f = let fullFile = dir </> f
-                            in do time <- getModificationTime fullFile
-                                  size <- getFileSize fullFile
-                                  hash <- hashFile fullFile
-                                  return $ FileInfo (db^.clientReplicaId) (db^.localVersionId) time size hash f
-
-isFileChange :: FileInfo -> FileInfo -> Bool
-isFileChange (FileInfo nId _ nTime nSize nHash _) (FileInfo oId _ oTime oSize oHash _) = nId == oId && (oTime /= nTime || oSize /= nSize || oHash /= nHash)
-
-mergeFileInfo :: FileInfo -> History -> History
-mergeFileInfo info history =
-  Map.insertWith (\_ olds -> map (\old -> if (isFileChange info old) then info else old) olds) (info^.fileName) [info] history
-
-updateLocalDb :: FilePath -> IO DataBase
-updateLocalDb dir = do
+fileInfo :: Directory -> IO (Map.Map FilePath FileInfo)
+fileInfo dir = do
   files <- getDirectoryContents dir
-  db <- maybe (generateReplicaId >>= (\rid -> return $ DataBase rid 1 Map.empty)) (fmap (over localVersionId (+1) .read) . readFile) $ find (== dbFile) files
   watchFile <- filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
-  nowFileInfos <- mapM (generateFileInfo db dir) watchFile
-  return $ over history (\h -> foldr mergeFileInfo h nowFileInfos) db
+  foldM (insertFileInfo dir) Map.empty watchFile
+  where
+    isFile f = isRegularFile <$> getSymbolicLinkStatus f
+    fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
+    insertFileInfo dir infos nf = do info <- FileInfo <$> fileHash (dir </> nf)
+                                     return $ Map.insert nf info infos
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
