@@ -44,6 +44,7 @@ test-suite test-trahs
               , QuickCheck > 2.5
               , hspec
               , trahs
-              , time
+              , lens
+              , containers
   ghc-options: -Wall
 

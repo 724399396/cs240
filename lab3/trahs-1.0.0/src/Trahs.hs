@@ -1,8 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Trahs (
-  trahs
-  ) where
+module Trahs where
 
 import           Codec.Digest.SHA
 import           Control.Lens
@@ -31,7 +29,7 @@ type Directory = FilePath
 data VersionInfo = VersionInfo {
     _replicaId :: Int64
   , _versionId :: Int64
-  } deriving (Show, Read)
+  } deriving (Show, Read, Eq)
 
 makeLenses ''VersionInfo
 
@@ -52,18 +50,18 @@ dataBase dir = do files <- getDirectoryContents dir
   where
     increaseVersion = fmap (over localVersion (+1))
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
-    initDB = generateReplicaId >>= (\id -> return $ DataBase id 0 Map.empty Map.empty)
+    initDB = generateReplicaId >>= (\rid -> return $ DataBase rid 0 Map.empty Map.empty)
 
 fileInfo :: Directory -> IO (Map.Map FilePath FileInfo)
 fileInfo dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
-  foldM (insertFileInfo dir) Map.empty watchFile
+  foldM insertFileInfo Map.empty watchFile
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
-    insertFileInfo dir infos nf = do info <- FileInfo <$> fileHash (dir </> nf)
-                                     return $ Map.insert nf info infos
+    insertFileInfo infos nf = do info <- FileInfo <$> fileHash (dir </> nf)
+                                 return $ Map.insert nf info infos
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do

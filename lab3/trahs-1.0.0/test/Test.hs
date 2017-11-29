@@ -2,8 +2,9 @@ module Main where
 
 import           Test.Hspec
 import           Test.QuickCheck
-import Data.Time.Clock
 import           Trahs
+import           Control.Lens
+import qualified Data.Map.Strict          as Map
 
 main :: IO ()
 main = hspec $ describe "Testing Lab 3" $ do
@@ -12,26 +13,19 @@ main = hspec $ describe "Testing Lab 3" $ do
     it "is inverse to show" $ property $
       \x -> (read . show) x == (x :: Int)
 
-  describe "generateReplicaId" $ do
-    it "range in 64 bit int" $ do
-      x <- generateReplicaId
-      x `shouldSatisfy` (\y -> y >= minBound && y <= maxBound)
+  describe "dataBase" $ do
+    it "replica id is random in range" $ do
+      db <- dataBase "."
+      (db^.clientReplicaId) `shouldSatisfy` (\y -> y >= minBound && y <= maxBound)
 
-  describe "isFileChange" $ do
-    it "different replicaId return false" $ do
-      now <- getCurrentTime
-      let fileInfo = FileInfo 1 1 now 10 "abc" "fileName"
-      isFileChange fileInfo (fileInfo {_replicaId = 2}) `shouldBe` False
+    it "local version is from 1" $ do
+      db <- dataBase "."
+      (db^.localVersion) `shouldBe` 1
 
-    it "same replicaId different md5 return true" $ property $ do
-      now <- getCurrentTime
-      let fileInfo = FileInfo 1 1 now 10 "" "fileName"
-      isFileChange fileInfo (fileInfo {_hashValue = "newHash"}) `shouldBe` True
+    it "version info should be empty when initial" $ do
+      db <- dataBase "."
+      (db^.versionInfos) `shouldBe` Map.empty
 
-    it "ignore version" $ property $ \versionId -> do
-      now <- getCurrentTime
-      let fileInfo = FileInfo 1 1 now 10 "" ""
-      isFileChange fileInfo (fileInfo {_versionId = versionId}) `shouldBe` False
-
-  describe "mergeFileInfo" $ do
-    it "merge file info with file name as key, isFileChange as compare method" $ do 
+    it "file info should be empty when initial" $ do
+      db <- dataBase "."
+      (db^.fileInfos) `shouldBe` Map.empty
