@@ -25,20 +25,24 @@ dbFile :: FilePath
 dbFile = ".trahs.db"
 
 type Directory = FilePath
+type VersionInfos = Map.Map FilePath [VersionInfo]
 
 data VersionInfo = VersionInfo {
     _replicaId :: Int64
   , _versionId :: Int64
+  , _isDeleted :: Bool
   } deriving (Show, Read, Eq)
 
 makeLenses ''VersionInfo
 
 data FileInfo = FileInfo String deriving (Show, Read, Eq)
 
+type FileInfos = Map.Map FilePath FileInfo
+
 data DataBase = DataBase {
     _clientReplicaId :: Int64
   , _localVersion    :: Int64
-  , _versionInfos    :: Map.Map FilePath [VersionInfo]
+  , _versionInfos    :: VersionInfos
   , _fileInfos       :: Map.Map FilePath FileInfo
   } deriving (Show, Read)
 
@@ -62,6 +66,16 @@ fileInfo dir = do
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
     insertFileInfo infos nf = do info <- FileInfo <$> fileHash (dir </> nf)
                                  return $ Map.insert nf info infos
+
+mergeInfo :: DataBase -> FileInfos -> DataBase
+mergeInfo (DataBase rid lv vis fis) nfis =
+  DataBase rid lv finalVis finalFis
+  where
+    added = Map.difference nfis fis
+    updated = Map.filterWithKey (\k v -> fis Map.! k /= nfis Map.! k) $ Map.intersection fis nfis
+    deleted = Map.difference fis nfis
+    finalFis = Map.unions [added, updated]
+    finalVis = Map.union (Map.foldrWithKey' (\k fi nvis -> Map.insert k (VersionInfo rid lv False) nvis) Map.empty finalFis) (Map.map (\v -> VersionInfo rid lv True) deleted)
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
