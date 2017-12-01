@@ -9,6 +9,7 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
+import           Data.Maybe               (fromJust)
 import           System.Directory
 import           System.Environment
 import           System.Exit
@@ -39,22 +40,22 @@ data FileInfo = FileInfo String deriving (Show, Read, Eq)
 
 type FileInfos = Map.Map FilePath FileInfo
 
-data DataBase = DataBase {
+data Database = Database {
     _clientReplicaId :: Int64
   , _localVersion    :: Int64
   , _versionInfos    :: VersionInfos
   , _fileInfos       :: Map.Map FilePath FileInfo
-  } deriving (Show, Read)
+  } deriving (Show, Read, Eq)
 
-makeLenses ''DataBase
+makeLenses ''Database
 
-dataBase :: Directory -> IO DataBase
+dataBase :: Directory -> IO Database
 dataBase dir = do files <- getDirectoryContents dir
                   increaseVersion $ maybe initDB (fmap read . readFile) $ find (== dbFile) files
   where
     increaseVersion = fmap (over localVersion (+1))
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
-    initDB = generateReplicaId >>= (\rid -> return $ DataBase rid 0 Map.empty Map.empty)
+    initDB = generateReplicaId >>= (\rid -> return $ Database rid 0 Map.empty Map.empty)
 
 fileInfo :: Directory -> IO (Map.Map FilePath FileInfo)
 fileInfo dir = do
@@ -67,15 +68,22 @@ fileInfo dir = do
     insertFileInfo infos nf = do info <- FileInfo <$> fileHash (dir </> nf)
                                  return $ Map.insert nf info infos
 
-mergeInfo :: DataBase -> FileInfos -> DataBase
-mergeInfo (DataBase rid lv vis fis) nfis =
-  DataBase rid lv finalVis finalFis
+mergeInfo :: Database -> FileInfos -> Database
+mergeInfo (Database rid lv vis fis) nfis =
+  Database rid lv finalVis finalFis
   where
     added = Map.difference nfis fis
-    updated = Map.filterWithKey (\k v -> fis Map.! k /= nfis Map.! k) $ Map.intersection fis nfis
+    oringalExisted = Map.intersection nfis fis
+    updated = Map.filterWithKey (\k _ -> fis Map.! k /= nfis Map.! k) oringalExisted
     deleted = Map.difference fis nfis
-    finalFis = Map.unions [added, updated]
-    finalVis = Map.union (Map.foldrWithKey' (\k fi nvis -> Map.insert k (VersionInfo rid lv False) nvis) Map.empty finalFis) (Map.map (\v -> VersionInfo rid lv True) deleted)
+    finalFis = Map.unions [added, oringalExisted]
+    getVersion :: FilePath -> Maybe VersionInfo -> VersionInfo
+    getVersion f vi = if (Map.member f updated)
+                      then VersionInfo rid lv False
+                      else if (Map.member f deleted)
+                           then VersionInfo rid lv True
+                           else (fromJust vi)
+    finalVis = Map.union (Map.mapWithKey (\f ovi -> (getVersion f (find (\vi -> vi^.replicaId == rid) ovi)) : filter (\vi -> vi^.replicaId /= rid) ovi) vis) (Map.map (const [VersionInfo rid lv False]) added)
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
