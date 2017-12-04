@@ -32,9 +32,11 @@ main = hspec $ describe "Testing Lab 3" $ do
 
   describe "mergeInfo" $ do
     let rid = 10
+        orid = 11
         lversion = 3
-        localVersion = VersionInfo 1 1 False
-        otherVersion = VersionInfo 2 2 False
+        localVersion = VersionInfo rid 1 False
+        increaseLocalVersion = VersionInfo rid lversion False
+        otherVersion = VersionInfo orid 12 False
         md5 = "abc"
     it "keep version when file not change" $ do
       let localFileInfo = Map.fromList [("file1", FileInfo md5)
@@ -50,8 +52,6 @@ main = hspec $ describe "Testing Lab 3" $ do
                                      ,("file2", FileInfo md5)]
           ovis = Map.fromList [("file1", [localVersion, otherVersion])
                               ,("file2", [localVersion])]
-          nvis = Map.fromList [("file1", [localVersion+1, otherVersion])
-                              ,("file2", [localVersion+1])]
           nmd5 = "sk"
           newFileInfo = Map.fromList [("file1", FileInfo nmd5)
                                      ,("file2", FileInfo nmd5)]
@@ -60,4 +60,29 @@ main = hspec $ describe "Testing Lab 3" $ do
       ndb `shouldBe` Database rid lversion
         (Map.fromList [("file1", [VersionInfo rid lversion False, otherVersion])
                       ,("file2", [VersionInfo rid lversion False])])
+        newFileInfo
+
+    it "mark delete when old file deleted" $ do
+      let oldFileInfo = Map.fromList [("file1", FileInfo md5)
+                                     ,("file2", FileInfo md5)]
+          ovis = Map.fromList [("file1", [localVersion, otherVersion])
+                              ,("file2", [localVersion])]
+          newFileInfo = Map.fromList []
+          db = Database rid lversion ovis oldFileInfo
+          ndb = mergeInfo db newFileInfo
+      ndb `shouldBe` Database rid lversion
+        (Map.fromList [("file1", [VersionInfo rid lversion True, otherVersion])
+                      ,("file2", [VersionInfo rid lversion True])])
+        newFileInfo
+
+    it "add new file version when add file" $ do
+      let oldFileInfo = Map.fromList [("file2", FileInfo md5)]
+          ovis = Map.fromList [("file2", [localVersion])]
+          newFileInfo = Map.fromList [("file1", FileInfo md5)
+                                     ,("file2", FileInfo md5)]
+          db = Database rid lversion ovis oldFileInfo
+          ndb = mergeInfo db newFileInfo
+      ndb `shouldBe` Database rid lversion
+        (Map.fromList [("file1", [VersionInfo rid lversion False])
+                      ,("file2", [localVersion])])
         newFileInfo

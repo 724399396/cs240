@@ -44,7 +44,7 @@ data Database = Database {
     _clientReplicaId :: Int64
   , _localVersion    :: Int64
   , _versionInfos    :: VersionInfos
-  , _fileInfos       :: Map.Map FilePath FileInfo
+  , _fileInfos       :: FileInfos
   } deriving (Show, Read, Eq)
 
 makeLenses ''Database
@@ -57,16 +57,14 @@ dataBase dir = do files <- getDirectoryContents dir
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
     initDB = generateReplicaId >>= (\rid -> return $ Database rid 0 Map.empty Map.empty)
 
-fileInfo :: Directory -> IO (Map.Map FilePath FileInfo)
+fileInfo :: Directory -> IO FileInfos
 fileInfo dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
-  foldM insertFileInfo Map.empty watchFile
+  Map.fromList <$> (mapM (\f -> fileHash f >>= \h -> return (f, FileInfo h)) watchFile)
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
-    insertFileInfo infos nf = do info <- FileInfo <$> fileHash (dir </> nf)
-                                 return $ Map.insert nf info infos
 
 mergeInfo :: Database -> FileInfos -> Database
 mergeInfo (Database rid lv vis fis) nfis =
@@ -83,7 +81,13 @@ mergeInfo (Database rid lv vis fis) nfis =
                       else if (Map.member f deleted)
                            then VersionInfo rid lv True
                            else (fromJust vi)
-    finalVis = Map.union (Map.mapWithKey (\f ovi -> (getVersion f (find (\vi -> vi^.replicaId == rid) ovi)) : filter (\vi -> vi^.replicaId /= rid) ovi) vis) (Map.map (const [VersionInfo rid lv False]) added)
+    addedVis = Map.map (const [VersionInfo rid lv False]) added
+    updateVersion f ovi =
+      let otherReplicaVis = filter (\vi -> vi^.replicaId /= rid) ovi
+          modifiedVis = getVersion f (find (\vi -> vi^.replicaId == rid) ovi)
+      in modifiedVis : otherReplicaVis
+    existedThenUpdateVis = Map.mapWithKey updateVersion vis
+    finalVis = Map.union addedVis existedThenUpdateVis
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
