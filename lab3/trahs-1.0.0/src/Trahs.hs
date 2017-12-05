@@ -15,6 +15,7 @@ import           System.Environment
 import           System.Exit
 import           System.FilePath.Posix
 import           System.IO
+import           System.IO.Temp
 import           System.PosixCompat.Files
 import           System.Process
 import           System.Random
@@ -49,9 +50,10 @@ data Database = Database {
 
 makeLenses ''Database
 
+-- sync local db
 dataBase :: Directory -> IO Database
 dataBase dir = do files <- getDirectoryContents dir
-                  increaseVersion $ maybe initDB (fmap read . readFile) $ find (== dbFile) files
+                  increaseVersion $ maybe initDB (fmap read . readFile . (dir </>)) $ find (== dbFile) files
   where
     increaseVersion = fmap (over localVersion (+1))
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
@@ -60,8 +62,8 @@ dataBase dir = do files <- getDirectoryContents dir
 fileInfo :: Directory -> IO FileInfos
 fileInfo dir = do
   files <- getDirectoryContents dir
-  watchFile <- filterM (\f -> isFile f >>= return . (&& f /= dbFile)) files
-  Map.fromList <$> (mapM (\f -> fileHash f >>= \h -> return (f, FileInfo h)) watchFile)
+  watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
+  Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, FileInfo h)) watchFile)
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
@@ -89,15 +91,29 @@ mergeInfo (Database rid lv vis fis) nfis =
     existedThenUpdateVis = Map.mapWithKey updateVersion vis
     finalVis = Map.union addedVis existedThenUpdateVis
 
+syncLocalDb :: FilePath -> IO Database
+syncLocalDb dir = do db <- dataBase dir
+                     fi <- fileInfo dir
+                     return $ mergeInfo db fi
+
+syncDbToDisk :: FilePath -> Database -> IO ()
+syncDbToDisk dir db =
+  do withTempFile dir dbFile $ (\nPath h ->
+         do hPutStr h (show db)
+            renameFile nPath (dir </> dbFile))
+
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
   hPutStrLn w "I am the server"
+  db <- syncLocalDb dir
+  syncDbToDisk dir db
   line <- hGetLine r
   -- maybe turn to client mode
   hPutStrLn w $ "You said " ++ line
 
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
+  db <- syncLocalDb dir
   line <- hGetLine r
   hPutStrLn stderr $ "The server said " ++ show line
   hPutStrLn w "Hello, server"

@@ -5,4 +5,6 @@ cabal.sandbox.config
 *.hi
 *.o
 code/target
-**/.stack-work
+.stack-work
+market
+garage
