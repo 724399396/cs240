@@ -27,7 +27,6 @@ dbFile :: FilePath
 dbFile = ".trahs.db"
 
 type Directory = FilePath
-type VersionInfos = Map.Map FilePath [VersionInfo]
 
 data VersionInfo = VersionInfo {
     _replicaId :: Int64
@@ -39,6 +38,7 @@ makeLenses ''VersionInfo
 
 data FileInfo = FileInfo String deriving (Show, Read, Eq)
 
+type VersionInfos = Map.Map FilePath [VersionInfo]
 type FileInfos = Map.Map FilePath FileInfo
 
 data Database = Database {
@@ -102,11 +102,33 @@ syncDbToDisk dir db =
          do hPutStr h (show db)
             renameFile nPath (dir </> dbFile))
 
+sendDbToClient :: Database -> Handle -> IO ()
+sendDbToClient db h = hPutStrLn h (show db)
+
+data Diff = Diff {
+  _addedFiles: [FilePath],
+  _updatedFiles: [FilePath],
+  _deleteFiles: [FilePath],
+  _conflictFiles: [FilePath]
+                 }
+
+makeLenses ''Diff
+
+compareDb :: Database -> Database -> (Database, Diff)
+compareDb (Database lrid _ ovis ofis) (Database _ _ nvis nfis) =
+  undefined
+  where
+    added = Map.difference nvis ovis
+    nonAdded = Map.intersection nvis ovis
+    keepSame = Map.filterWithKey (\k _ -> nvis ! k == ovis ! k) nonAdded
+    changed = Map.filterWithKey (\k _ -> nvis ! k /= ovis ! k) nonAdded
+
+
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
-  hPutStrLn w "I am the server"
   db <- syncLocalDb dir
   syncDbToDisk dir db
+  sendDbToClient db w
   line <- hGetLine r
   -- maybe turn to client mode
   hPutStrLn w $ "You said " ++ line
@@ -115,7 +137,8 @@ client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
   db <- syncLocalDb dir
   line <- hGetLine r
-  hPutStrLn stderr $ "The server said " ++ show line
+  hPutStrLn stderr $ "The server send database " ++ show line
+  let serverDb = (read line) :: Database
   hPutStrLn w "Hello, server"
   line' <- hGetLine r
   hPutStrLn stderr $ "The server said " ++ show line'
