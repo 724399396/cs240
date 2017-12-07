@@ -106,22 +106,29 @@ sendDbToClient :: Database -> Handle -> IO ()
 sendDbToClient db h = hPutStrLn h (show db)
 
 data Diff = Diff {
-  _addedFiles: [FilePath],
-  _updatedFiles: [FilePath],
-  _deleteFiles: [FilePath],
-  _conflictFiles: [FilePath]
+  _addedFiles:: [FilePath],
+  _updatedFiles:: [FilePath],
+  _deleteFiles:: [FilePath],
+  _conflictFiles:: [FilePath]
                  }
 
 makeLenses ''Diff
 
 compareDb :: Database -> Database -> (Database, Diff)
 compareDb (Database lrid _ ovis ofis) (Database _ _ nvis nfis) =
+  let
+    isLocalChanged :: [VersionInfo] -> [VersionInfo] -> Bool
+    isLocalChanged ovi nvi =
+      find (\vi -> vi^.replicaId == lrid) ovi ==
+      find (\vi -> vi^.replicaId == lrid) nvi
+  in
   undefined
   where
     added = Map.difference nvis ovis
     nonAdded = Map.intersection nvis ovis
     keepSame = Map.filterWithKey (\k _ -> nvis ! k == ovis ! k) nonAdded
-    changed = Map.filterWithKey (\k _ -> nvis ! k /= ovis ! k) nonAdded
+    changed = Map.filterWithKey (\k -> nvis ! k /= ovis ! k) nonAdded
+    localNotChange = Map.filterWithKey (\k _ -> ) changed
 
 
 server :: Handle -> Handle -> FilePath -> IO ()
