@@ -114,21 +114,45 @@ data Diff = Diff {
 
 makeLenses ''Diff
 
+data ChangeStatus = Added | Same | Updated | Deleted | Conflict deriving (Show, Eq)
+
 compareDb :: Database -> Database -> (Database, Diff)
 compareDb (Database lrid _ ovis ofis) (Database _ _ nvis nfis) =
-  let
-    isLocalChanged :: [VersionInfo] -> [VersionInfo] -> Bool
-    isLocalChanged ovi nvi =
-      find (\vi -> vi^.replicaId == lrid) ovi ==
-      find (\vi -> vi^.replicaId == lrid) nvi
-  in
   undefined
   where
+    statusForReplica :: Maybe VersionInfo -> Maybe VersionInfo -> ChangeStatus
+    statusForReplica (Just _) Nothing = Added
+    statusForReplica (Just (VersionInfo _ v1 d1)) (Just (VersionInfo _ v2 d2))
+      | v1 == v2 = Same
+      | v1 /= v2 && d1 = Deleted
+      | v1 /= v2 && not d1 = Updated
+
+    changeStatus :: [VersionInfo] -> [VersionInfo] -> ChangeStatus
+    changeStatus nvi ovi = let
+      findLocal = find (\v -> v^.replicaId == lrid)
+      expectOther = filter (\v -> v^.replicaId /= lrid)
+      localStatus = statusForReplica (findLocal nvi) (findLocal ovi)
+      oviMap = Map.fromList (map (\v -> (v^.replicaId, v)) ovi)
+      nviMap = Map.fromList (map (\v -> (v^.replicaId, v)) nvi)
+      otherStatus = nub $ map (\rid -> statusForReplica (nviMap Map.!? rid) (oviMap Map.!? rid)) (nub $ map (\v -> v^. replicaId) (nvi ++ ovi))
+      in case (localStatus, otherStatus) of
+           (Added, []) -> Added
+           (Same, []) -> Same
+           (Same, [x]) -> x
+           (Updated, []) -> Updated
+           (Updated, [Same]) -> Updated
+           (Updated, [Deleted]) -> Updated
+           (Updated, [Updated]) -> Conflict
+           (Deleted, [Updated]) -> Updated
+           (Deleted, [x]) -> Deleted
+           e -> error $ "not corver part" ++ (show e)
+
+
     added = Map.difference nvis ovis
     nonAdded = Map.intersection nvis ovis
-    keepSame = Map.filterWithKey (\k _ -> nvis ! k == ovis ! k) nonAdded
-    changed = Map.filterWithKey (\k -> nvis ! k /= ovis ! k) nonAdded
-    localNotChange = Map.filterWithKey (\k _ -> ) changed
+    keepSame = Map.filterWithKey (\k _ -> nvis Map.! k == ovis Map.! k) nonAdded
+    changed = Map.filterWithKey (\k _ -> nvis Map.! k /= ovis Map.! k) nonAdded
+    
 
 
 server :: Handle -> Handle -> FilePath -> IO ()
