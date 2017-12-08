@@ -9,6 +9,7 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
+import qualified Data.Set.Strict as Set
 import           Data.Maybe               (fromJust)
 import           System.Directory
 import           System.Environment
@@ -117,20 +118,19 @@ makeLenses ''Diff
 data ChangeStatus = Added | Same | Updated | Deleted | Conflict deriving (Show, Eq)
 
 compareDb :: Database -> Database -> (Database, Diff)
-compareDb (Database lrid _ ovis ofis) (Database _ _ nvis nfis) =
-  undefined
+compareDb (Database lrid lv ovis ofis) (Database _ _ nvis nfis) =
+  (Database lrid lv )
   where
+    expectOther = filter (\v -> v^.replicaId /= lrid)
+    findLocal = find (\v -> v^.replicaId == lrid)
     statusForReplica :: Maybe VersionInfo -> Maybe VersionInfo -> ChangeStatus
     statusForReplica (Just _) Nothing = Added
     statusForReplica (Just (VersionInfo _ v1 d1)) (Just (VersionInfo _ v2 d2))
       | v1 == v2 = Same
       | v1 /= v2 && d1 = Deleted
       | v1 /= v2 && not d1 = Updated
-
     changeStatus :: [VersionInfo] -> [VersionInfo] -> ChangeStatus
     changeStatus nvi ovi = let
-      findLocal = find (\v -> v^.replicaId == lrid)
-      expectOther = filter (\v -> v^.replicaId /= lrid)
       localStatus = statusForReplica (findLocal nvi) (findLocal ovi)
       oviMap = Map.fromList (map (\v -> (v^.replicaId, v)) ovi)
       nviMap = Map.fromList (map (\v -> (v^.replicaId, v)) nvi)
@@ -146,14 +146,17 @@ compareDb (Database lrid _ ovis ofis) (Database _ _ nvis nfis) =
            (Deleted, [Updated]) -> Updated
            (Deleted, [x]) -> Deleted
            e -> error $ "not corver part" ++ (show e)
-
-
-    added = Map.difference nvis ovis
-    nonAdded = Map.intersection nvis ovis
-    keepSame = Map.filterWithKey (\k _ -> nvis Map.! k == ovis Map.! k) nonAdded
-    changed = Map.filterWithKey (\k _ -> nvis Map.! k /= ovis Map.! k) nonAdded
-    
-
+    calcVersionInfo :: FilePath -> ChangeStatus -> [VersionInfo] -> FileInfo -> [VersionInfo] -> FileInfo -> [(f, [VersionInfo])]
+    calcVersionInfo f Added n _ _ _ = (f, n)
+    calcVersionInfo f Same n _ _ _ = (f, n)
+    calcVersionInfo f Updated n _ _ _ = (f, n)
+    calcVersionInfo f Deleted n _ _ _ = (f, n)
+    calcVersionInfo f Conflict n (FileInfo nfi) o (FileInfo ofi) = let
+      nLocal = fromJust $ findLocal nvis
+      oLocal = fromJust $ findLocal ovis
+      in
+      [(f ++ "#" ++ nfi ++ (nLocal^.replicaId), (VersoinInfo lrid lv nLocal) : (expectOther nvis)), (f ++ "#" ++ ofi ++ (oLocal^.replicaId), (VersoinInfo lrid lv oLocal) : (expectOther ovis))]
+    changes = map (\k -> changeStatus (nvis Map.! k) (ovis Map.! k)) (Set.union (Map.keySet nvis) (Map.keySet ovis))
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
