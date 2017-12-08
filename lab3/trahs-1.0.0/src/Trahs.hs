@@ -9,6 +9,7 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
+import qualified Data.Set.Strict          as Set
 import           Data.Maybe               (fromJust)
 import           System.Directory
 import           System.Environment
@@ -28,7 +29,7 @@ dbFile = ".trahs.db"
 
 type Directory = FilePath
 
-data FileInfo = Hash String String | Deleted deriving (Show, Read, Eq)
+data FileInfo = Hash String L.ByteString | Deleted deriving (Show, Read, Eq)
 
 data VersionInfo = VersionInfo {
     _replicaId :: Int64
@@ -49,46 +50,35 @@ data Database = Database {
 makeLenses ''Database
 
 -- sync local db
-dataBase :: Directory -> IO Database
-dataBase dir = do files <- getDirectoryContents dir
-                  increaseVersion $ maybe initDB (fmap read . readFile . (dir </>)) $ find (== dbFile) files
+localDatabase :: Directory -> IO Database
+localDatabase dir = do files <- getDirectoryContents dir
+                       increaseVersion $ maybe initDB (fmap read . readFile . (dir </>)) $ find (== dbFile) files
   where
     increaseVersion = fmap (over localVersion (+1))
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
     initDB = generateReplicaId >>= (\rid -> return $ Database rid 0 Map.empty)
 
-fileInfo :: Directory -> IO VersionInfos
-fileInfo dir = do
+localFileInfo :: Int64 -> Directory -> IO VersionInfos
+localFileInfo lrid dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
-  hashAndContens <- mapM (\f -> (,) <$> fileHash (dir </> f) <*> readFile (dir </> f))
-  Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, FileInfo h)) watchFile)
+  hashAndContens <- mapM (\f -> (,,) <$> fileHash (dir </> f) <*> L.readFile (dir </> f)) watchFile
+  filter (\(f,h,c) -> (f, Map.singleton lrid $ Hash h c))
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
 
-mergeInfo :: Database -> FileInfos -> Database
-mergeInfo (Database rid lv vis fis) nfis =
-  Database rid lv finalVis finalFis
+mergeInfo :: Database -> VersionInfos -> Database
+mergeInfo (Database rid v vis) nvis =
+  Database rid v mergedVis
   where
-    added = Map.difference nfis fis
-    oringalExisted = Map.intersection nfis fis
-    updated = Map.filterWithKey (\k _ -> fis Map.! k /= nfis Map.! k) oringalExisted
-    deleted = Map.difference fis nfis
-    finalFis = Map.unions [added, oringalExisted]
-    getVersion :: FilePath -> Maybe VersionInfo -> VersionInfo
-    getVersion f vi = if (Map.member f updated)
-                      then VersionInfo rid lv False
-                      else if (Map.member f deleted)
-                           then VersionInfo rid lv True
-                           else (fromJust vi)
-    addedVis = Map.map (const [VersionInfo rid lv False]) added
-    updateVersion f ovi =
-      let otherReplicaVis = filter (\vi -> vi^.replicaId /= rid) ovi
-          modifiedVis = getVersion f (find (\vi -> vi^.replicaId == rid) ovi)
-      in modifiedVis : otherReplicaVis
-    existedThenUpdateVis = Map.mapWithKey updateVersion vis
-    finalVis = Map.union addedVis existedThenUpdateVis
+    allFiles = Set.union (Map.keysSet vis) (Map.keysSet nvis)
+    merge :: Maybe FileInfo -> Maybe FileInfo -> FileInfo
+    merge Nothing _ = Deleted
+    merge (Just x) Nothing = x
+    merge (Just x) (Just y) = case (x, y) of
+      (Deleted, Deleted) -> Deleted
+      (Deleted, _) ->
 
 syncLocalDb :: FilePath -> IO Database
 syncLocalDb dir = do db <- dataBase dir
