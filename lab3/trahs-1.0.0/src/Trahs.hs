@@ -9,7 +9,6 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
-import qualified Data.Set.Strict as Set
 import           Data.Maybe               (fromJust)
 import           System.Directory
 import           System.Environment
@@ -29,24 +28,22 @@ dbFile = ".trahs.db"
 
 type Directory = FilePath
 
+data FileInfo = Hash String String | Deleted deriving (Show, Read, Eq)
+
 data VersionInfo = VersionInfo {
     _replicaId :: Int64
   , _versionId :: Int64
-  , _isDeleted :: Bool
+  , _fileInfo :: FileInfo
   } deriving (Show, Read, Eq)
+
+type VersionInfos = Map.Map FilePath (Map.Map Int64 VersionInfo)
 
 makeLenses ''VersionInfo
 
-data FileInfo = FileInfo String deriving (Show, Read, Eq)
-
-type VersionInfos = Map.Map FilePath [VersionInfo]
-type FileInfos = Map.Map FilePath FileInfo
-
 data Database = Database {
-    _clientReplicaId :: Int64
-  , _localVersion    :: Int64
+    _localReplicaId :: Int64
+  , _localVersionId    :: Int64
   , _versionInfos    :: VersionInfos
-  , _fileInfos       :: FileInfos
   } deriving (Show, Read, Eq)
 
 makeLenses ''Database
@@ -58,12 +55,13 @@ dataBase dir = do files <- getDirectoryContents dir
   where
     increaseVersion = fmap (over localVersion (+1))
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
-    initDB = generateReplicaId >>= (\rid -> return $ Database rid 0 Map.empty Map.empty)
+    initDB = generateReplicaId >>= (\rid -> return $ Database rid 0 Map.empty)
 
-fileInfo :: Directory -> IO FileInfos
+fileInfo :: Directory -> IO VersionInfos
 fileInfo dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
+  hashAndContens <- mapM (\f -> (,) <$> fileHash (dir </> f) <*> readFile (dir </> f))
   Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, FileInfo h)) watchFile)
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
