@@ -9,7 +9,7 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
-import qualified Data.Set.Strict          as Set
+--import qualified Data.Set          as Set
 import           Data.Maybe               (fromJust)
 import           System.Directory
 import           System.Environment
@@ -28,25 +28,22 @@ dbFile :: FilePath
 dbFile = ".trahs.db"
 
 type Directory = FilePath
-
 data FileInfo = Hash String L.ByteString | Deleted deriving (Show, Read, Eq)
+type FileInfos = Map.Map FilePath FileInfo
 
 data VersionInfo = VersionInfo {
     _replicaId :: Int64
   , _versionId :: Int64
   , _fileInfo :: FileInfo
   } deriving (Show, Read, Eq)
-
-type VersionInfos = Map.Map FilePath (Map.Map Int64 VersionInfo)
-
 makeLenses ''VersionInfo
+type VersionInfos = Map.Map FilePath (Map.Map Int64 VersionInfo)
 
 data Database = Database {
     _localReplicaId :: Int64
   , _localVersionId    :: Int64
   , _versionInfos    :: VersionInfos
   } deriving (Show, Read, Eq)
-
 makeLenses ''Database
 
 -- sync local db
@@ -58,27 +55,26 @@ localDatabase dir = do files <- getDirectoryContents dir
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
     initDB = generateReplicaId >>= (\rid -> return $ Database rid 0 Map.empty)
 
-localFileInfo :: Int64 -> Directory -> IO VersionInfos
-localFileInfo lrid dir = do
+localFileInfo :: Directory -> IO FileInfos
+localFileInfo dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
-  hashAndContens <- mapM (\f -> (,,) <$> fileHash (dir </> f) <*> L.readFile (dir </> f)) watchFile
-  filter (\(f,h,c) -> (f, Map.singleton lrid $ Hash h c))
+  mapM (\f -> (\h c -> (f, (Hash h c))) <$> fileHash (dir </> f) <*> L.readFile (dir </> f)) watchFile
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
 
-mergeInfo :: Database -> VersionInfos -> Database
-mergeInfo (Database rid v vis) nvis =
+mergeInfo :: Database -> FileInfos -> Database
+mergeInfo (Database rid v vis) nfis =
   Database rid v mergedVis
   where
-    allFiles = Set.union (Map.keysSet vis) (Map.keysSet nvis)
+    allFiles = Set.union (Map.keysSet vis) (Map.keysSet nfis)
     merge :: Maybe FileInfo -> Maybe FileInfo -> FileInfo
     merge Nothing _ = Deleted
     merge (Just x) Nothing = x
     merge (Just x) (Just y) = case (x, y) of
       (Deleted, Deleted) -> Deleted
-      (Deleted, _) ->
+      (Deleted, _) -> undefined
 
 syncLocalDb :: FilePath -> IO Database
 syncLocalDb dir = do db <- dataBase dir
