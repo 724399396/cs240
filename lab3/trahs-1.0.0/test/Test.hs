@@ -1,10 +1,10 @@
 module Main where
 
+import           Control.Lens
+import qualified Data.Map.Strict as Map
 import           Test.Hspec
 import           Test.QuickCheck
 import           Trahs
-import           Control.Lens
-import qualified Data.Map.Strict          as Map
 
 main :: IO ()
 main = hspec $ describe "Testing Lab 3" $ do
@@ -44,11 +44,11 @@ main = hspec $ describe "Testing Lab 3" $ do
                                         ,((file2, lrid), versionForLocalFile2)]
         file1Hash = "hash1"
         file2Hash = "hash2"
-        localFileInfo = Map.fromList [(file1, file1Hash)
+        localOriginFileInfo = Map.fromList [(file1, file1Hash)
                                      ,(file2, file2Hash)]
-        localDb = Database lrid currentVersion localVersionInfo localFileInfo
+        localDb = Database lrid currentVersion localVersionInfo localOriginFileInfo
     it "keep version when file not change" $ do
-      let ndb = mergeLocalInfo localDb localFileInfo
+      let ndb = mergeLocalInfo localDb localOriginFileInfo
       ndb `shouldBe` localDb
 
     it "increase current replica version and keep other replica version when old file change" $ do
