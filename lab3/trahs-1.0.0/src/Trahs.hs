@@ -27,7 +27,7 @@ dbFile :: FilePath
 dbFile = ".trahs.db"
 
 type Directory = FilePath
-newtype ReplicaId = ReplicaId Int64 deriving (Show, Read, Eq, Ord)
+newtype ReplicaId = ReplicaId Int64 deriving (Show, Read, Eq, Ord, Bounded)
 newtype Version = Version Int64 deriving (Show, Read, Eq, Ord)
 type VersionInfo = Map.Map (FilePath, ReplicaId) Version
 type FileInfo = Map.Map FilePath String
@@ -48,36 +48,43 @@ localDatabase dir = do files <- getDirectoryContents dir
   where
     increaseVersion = fmap (over versionId (\(Version v) -> Version $ v+1))
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
-    initDB = generateReplicaId >>= (\rid -> return $ Database (ReplicaId rid) 0 Map.empty Map.empty)
+    initDB = generateReplicaId >>= (\rid -> return $ Database (ReplicaId rid) (Version 0) Map.empty Map.empty)
 
--- localFileInfo :: Directory -> IO FileInfo
--- localFileInfo dir = do
---   files <- getDirectoryContents dir
---   watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
---   Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, FileInfo h)) watchFile)
---   where
---     isFile f = isRegularFile <$> getSymbolicLinkStatus f
---     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
+localFileInfo :: Directory -> IO FileInfo
+localFileInfo dir = do
+  files <- getDirectoryContents dir
+  watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
+  Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, h)) watchFile)
+  where
+    isFile f = isRegularFile <$> getSymbolicLinkStatus f
+    fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
 
--- mergeLocalInfo :: Database -> FileInfo -> Database
--- mergeLocalInfo (Database rid vid vis fis) nfis =
---   Database rid lv finalVis nfis
---   where
---     finalVis = undefined
+mergeLocalInfo :: Database -> FileInfo -> Database
+mergeLocalInfo (Database rid vid vis fis) nfis =
+  Database rid vid finalVis nfis
+  where
+    merge :: Maybe (Version, String) -> String -> Version
+    merge Nothing c = vid
+    merge (Just (ovid, c1)) c2 = if (c1 == c2) then ovid else vid
+    allFiles = Map.assocs nfis
+    calVersionInfo :: FilePath -> [((FilePath,ReplicaId),Version)] -> [((FilePath,ReplicaId),Version)]
+    calVersionInfo f [] = [((f, rid), vid)]
+    calVersionInfo f xs = ((f,rid), merge (find (\(f1,v) -> f1 == f && orid == rid) nfis) (fis Map.! f)) : (filter (\((_, orid), _) -> orid /= rid) xs)
+    finalVis = Map.fromList $ join $ map (\((f,orid),ovid) -> calVersionInfo f (filter (\((f1,_),_) ->f == f1) allFiles)) allFiles
 
--- syncLocalDb :: FilePath -> IO Database
--- syncLocalDb dir = do db <- dataBase dir
---                      fi <- fileInfo dir
---                      return $ mergeInfo db fi
+syncLocalDb :: FilePath -> IO Database
+syncLocalDb dir = do db <- localDatabase dir
+                     fi <- localFileInfo dir
+                     return $ mergeLocalInfo db fi
 
--- syncDbToDisk :: FilePath -> Database -> IO ()
--- syncDbToDisk dir db =
---   do withTempFile dir dbFile $ (\nPath h ->
---          do hPutStr h (show db)
---             renameFile nPath (dir </> dbFile))
+syncDbToDisk :: FilePath -> Database -> IO ()
+syncDbToDisk dir db =
+  do withTempFile dir dbFile $ (\nPath h ->
+         do hPutStr h (show db)
+            renameFile nPath (dir </> dbFile))
 
--- sendDbToClient :: Database -> Handle -> IO ()
--- sendDbToClient db h = hPutStrLn h (show db)
+sendDbToClient :: Database -> Handle -> IO ()
+sendDbToClient db h = hPutStrLn h (show db)
 
 -- data Diff = Diff {
 --   _addedFiles:: [FilePath],
@@ -131,56 +138,56 @@ localDatabase dir = do files <- getDirectoryContents dir
 --       [(f ++ "#" ++ nfi ++ (nLocal^.replicaId), (VersoinInfo lrid lv nLocal) : (expectOther nvis)), (f ++ "#" ++ ofi ++ (oLocal^.replicaId), (VersoinInfo lrid lv oLocal) : (expectOther ovis))]
 --     changes = map (\k -> changeStatus (nvis Map.! k) (ovis Map.! k)) (Set.union (Map.keySet nvis) (Map.keySet ovis))
 
--- server :: Handle -> Handle -> FilePath -> IO ()
--- server r w dir = do
---   db <- syncLocalDb dir
---   syncDbToDisk dir db
---   sendDbToClient db w
---   line <- hGetLine r
---   -- maybe turn to client mode
---   hPutStrLn w $ "You said " ++ line
+server :: Handle -> Handle -> FilePath -> IO ()
+server r w dir = do
+  db <- syncLocalDb dir
+  syncDbToDisk dir db
+  sendDbToClient db w
+  line <- hGetLine r
+  -- maybe turn to client mode
+  hPutStrLn w $ "You said " ++ line
 
--- client :: Bool -> Handle -> Handle -> FilePath -> IO ()
--- client turn r w dir = do
---   db <- syncLocalDb dir
---   line <- hGetLine r
---   hPutStrLn stderr $ "The server send database " ++ show line
---   let serverDb = (read line) :: Database
---   hPutStrLn w "Hello, server"
---   line' <- hGetLine r
---   hPutStrLn stderr $ "The server said " ++ show line'
---   -- if turn, turn to server
+client :: Bool -> Handle -> Handle -> FilePath -> IO ()
+client turn r w dir = do
+  db <- syncLocalDb dir
+  line <- hGetLine r
+  hPutStrLn stderr $ "The server send database " ++ show line
+  let serverDb = (read line) :: Database
+  hPutStrLn w "Hello, server"
+  line' <- hGetLine r
+  hPutStrLn stderr $ "The server said " ++ show line'
+  -- if turn, turn to server
 
--- hostCmd :: String -> FilePath -> IO String
--- hostCmd host dir = do
---   tmp <- maybe trassh id <$> lookupEnv "TRASSH"
---   case break (== '@') tmp of
---     (b, '@':e) -> return $ b ++ host ++ e ++ ' ':dir
---     _          -> return $ tmp ++ ' ':dir
+hostCmd :: String -> FilePath -> IO String
+hostCmd host dir = do
+  tmp <- maybe trassh id <$> lookupEnv "TRASSH"
+  case break (== '@') tmp of
+    (b, '@':e) -> return $ b ++ host ++ e ++ ' ':dir
+    _          -> return $ tmp ++ ' ':dir
 
--- spawnRemote :: String -> FilePath -> IO (Handle, Handle)
--- spawnRemote host dir = do
---   cmd <- hostCmd host dir
---   hPutStrLn stderr $ "running " ++ show cmd
---   (Just w, Just r, _, _) <- createProcess (shell cmd) {
---       std_in = CreatePipe
---     , std_out = CreatePipe
---     }
---   hSetBuffering w LineBuffering
---   return (r, w)
+spawnRemote :: String -> FilePath -> IO (Handle, Handle)
+spawnRemote host dir = do
+  cmd <- hostCmd host dir
+  hPutStrLn stderr $ "running " ++ show cmd
+  (Just w, Just r, _, _) <- createProcess (shell cmd) {
+      std_in = CreatePipe
+    , std_out = CreatePipe
+    }
+  hSetBuffering w LineBuffering
+  return (r, w)
 
--- connect :: String -> FilePath -> FilePath -> IO ()
--- connect host rdir ldir = do
---   (r, w) <- spawnRemote host rdir
---   client True r w ldir
+connect :: String -> FilePath -> FilePath -> IO ()
+connect host rdir ldir = do
+  (r, w) <- spawnRemote host rdir
+  client True r w ldir
 
--- trahs :: IO ()
--- trahs = do
---   args <- getArgs
---   case args of
---     ["--server", l] -> do hSetBuffering stdout LineBuffering
---                           server stdin stdout l
---     [r, l] | (host, ':':rdir) <- break (== ':') r -> connect host rdir l
---     _ -> do hPutStrLn stderr "usage: trahs HOST:DIR LOCALDIR"
---             exitFailure
+trahs :: IO ()
+trahs = do
+  args <- getArgs
+  case args of
+    ["--server", l] -> do hSetBuffering stdout LineBuffering
+                          server stdin stdout l
+    [r, l] | (host, ':':rdir) <- break (== ':') r -> connect host rdir l
+    _ -> do hPutStrLn stderr "usage: trahs HOST:DIR LOCALDIR"
+            exitFailure
 
