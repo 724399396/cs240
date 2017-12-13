@@ -102,23 +102,24 @@ compareDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
   where
     allMergeInfo :: [(FilePath, ChangeStatus)]
     allMergeInfo = map (\f -> (f, merge f (lfis Map.!? f) (ofis Map.!? f))) (nub $ Map.keys lfis ++ Map.keys ofis)
+    findWithDefaultZero = Map.findWithDefault (Version 0)
     merge :: FilePath -> Maybe String -> Maybe String -> ChangeStatus
-    merge f Nothing (Just _) = let lvFo = lvis Map.! (f, orid)
-                                   ovFo = ovis Map.! (f, orid)
+    merge f Nothing (Just _) = let lvFo = findWithDefaultZero (f, orid) lvis
+                                   ovFo = findWithDefaultZero (f, orid) ovis
                                in if (ovFo > lvFo)
                                   then Update
                                   else Same
-    merge f (Just _) Nothing = let lvFl = lvis Map.! (f, lrid)
-                                   ovFl = ovis Map.! (f, lrid)
+    merge f (Just _) Nothing = let lvFl = findWithDefaultZero (f, lrid) lvis
+                                   ovFl = findWithDefaultZero (f, lrid) ovis
                                in if (ovFl <= lvFl)
                                   then Delete
                                   else Same
     merge f (Just c1) (Just c2)
       | c1 == c2 = Same
-      | c1 /= c2 = let lvFo = lvis Map.! (f, orid)
-                       ovFo = ovis Map.! (f, orid)
-                       lvFl = lvis Map.! (f, lrid)
-                       ovFl = ovis Map.! (f, lrid)
+      | c1 /= c2 = let lvFo = findWithDefaultZero (f, orid) lvis
+                       ovFo = findWithDefaultZero (f, orid) ovis
+                       lvFl = findWithDefaultZero (f, lrid) lvis
+                       ovFl = findWithDefaultZero (f, lrid) ovis
                    in if ovFo <= lvFo
                       then Same
                       else (if ovFl <= lvFl
