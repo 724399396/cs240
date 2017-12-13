@@ -64,7 +64,7 @@ mergeLocalInfo (Database rid vid vis fis) nfis =
   Database rid vid finalVis nfis
   where
     calVersionCurrentReplica :: Maybe (Version, String) -> Maybe String -> Maybe Version
-    calVersionCurrentReplica (Just _) Nothing = Nothing
+    calVersionCurrentReplica (Just _) Nothing = Just vid
     calVersionCurrentReplica Nothing (Just _) = Just vid
     calVersionCurrentReplica (Just (ovid, c1)) (Just c2) = Just $ if (c1 == c2) then ovid else vid
     calVersionCurrentReplica _ _ = error "not complete calVersionCurrentReplica"
@@ -94,12 +94,14 @@ syncDbToDisk dir db =
 sendDbToClient :: Database -> Handle -> IO ()
 sendDbToClient db h = hPutStrLn h (show db)
 
-data ChangeStatus = Same | Update | Delete | Conflict deriving (Show, Eq)
+data ChangeStatus = Same | Update | Delete | Conflict deriving (Show, Eq, Ord)
 
-mergeDb :: Database -> Database -> (Database, [FilePath])
-mergeDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
-  (Database lrid lv )
+compareDb :: Database -> Database -> Map.Map ChangeStatus [FilePath]
+compareDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
+   foldl (\acc (f, status) -> Map.insertWith (++) status [f] acc) Map.empty allMergeInfo
   where
+    allMergeInfo :: [(FilePath, ChangeStatus)]
+    allMergeInfo = map (\f -> (f, merge f (lfis Map.!? f) (ofis Map.!? f))) (nub $ Map.keys lfis ++ Map.keys ofis)
     merge :: FilePath -> Maybe String -> Maybe String -> ChangeStatus
     merge f Nothing (Just _) = let lvFo = lvis Map.! (f, orid)
                                    ovFo = ovis Map.! (f, orid)
@@ -122,8 +124,7 @@ mergeDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
                       else (if ovFl <= lvFl
                             then Update
                             else Conflict)
-
-    
+    merge _ _ _ = error "not impossible"
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
