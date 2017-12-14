@@ -120,11 +120,12 @@ compareDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
                        ovFo = findWithDefaultZero (f, orid) ovis
                        lvFl = findWithDefaultZero (f, lrid) lvis
                        ovFl = findWithDefaultZero (f, lrid) ovis
-                   in if ovFo <= lvFo
-                      then Same
-                      else (if ovFl <= lvFl
-                            then Update
-                            else Conflict)
+                       oCompare = ovFo `compare` lvFo
+                       lCompare = ovFl `compare` lvFl
+                   in case (oCompare, lCompare) of
+                        (EQ, _) -> Same
+                        (GT, EQ) -> Update
+                        (GT, LT) -> Conflict
     merge _ _ _ = error "not impossible"
 
 server :: Handle -> Handle -> FilePath -> IO ()

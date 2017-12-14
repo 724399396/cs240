@@ -85,6 +85,7 @@ main = hspec $ describe "Testing Lab 3" $ do
         orid = ReplicaId 11
         file1 = "file1"
         file2 = "file2"
+        file3 = "file3"
         versionForLocalFile1 = Version 3
         versionForOtherFile1 = Version 1
         versionForLocalFile2 = Version 4
@@ -96,38 +97,69 @@ main = hspec $ describe "Testing Lab 3" $ do
         file1Hash = "hash1"
         file2Hash = "hash2"
         localOriginFileInfo = Map.fromList [(file1, file1Hash)
-                                     ,(file2, file2Hash)]
+                                           ,(file2, file2Hash)]
     it "keep on same key when file not change" $ do
       let localDb = Database lrid currentVersion localVersionInfo localOriginFileInfo
           otherDb = Database orid otherVersion localVersionInfo localOriginFileInfo
           result = compareDb localDb otherDb
       (sort (result Map.! Same)) `shouldBe` (sort [file1, file2])
 
-    it "keep on update when old file change on client" $ do
+    it "keep on same when file add on client" $ do
+      let newHash = "newHash"
+          newFileInfo = Map.insert file3 newHash localOriginFileInfo
+          otherDb = Database orid otherVersion localVersionInfo localOriginFileInfo
+          localDb = Database lrid currentVersion (Map.insert (file3, lrid) currentVersion localVersionInfo) newFileInfo
+          result = compareDb localDb otherDb
+      (sort (result Map.! Same)) `shouldBe` (sort [file1, file2, file3])
+
+
+    it "keep on same when old file change on client" $ do
       let newHash = "newHash"
           newFileInfo = Map.fromList [(file1, newHash)
                                      ,(file2, newHash)]
           otherDb = Database orid otherVersion localVersionInfo localOriginFileInfo
           localDb = Database lrid currentVersion (Map.fromList [((file1, lrid), currentVersion)
-                                        ,((file1, orid), versionForLocalFile2)
+                                        ,((file1, orid), versionForOtherFile1)
                                         ,((file2, lrid), currentVersion)]) newFileInfo
           result = compareDb localDb otherDb
-      result `shouldBe` Map.empty
---      (sort (result Map.! Update)) `shouldBe` (sort [file1, file2])
+      (sort (result Map.! Same)) `shouldBe` (sort [file1, file2])
 
-    -- it "keep on update when old file change on server" $ do
-    --   let newHash = "newHash"
-    --       newFileInfo = Map.fromList [(file1, newHash)
-    --                                  ,(file2, newHash)]
-    --       otherDb = Database orid otherVersion (Map.fromList [((file1, orid), versionForLocalFile1)
-    --                                     ,((file1, lrid), versionForOtherFile1)
-    --                                     ,((file2, lrid), versionForLocalFile2)]) localOriginFileInfo
-    --       updateLocalDb = Database lrid currentVersion (Map.fromList [((file1, lrid), currentVersion)
-    --                                     ,((file1, orid), versionForOtherFile1)
-    --                                     ,((file2, lrid), currentVersion)
-    --                                     ,((file2, orid), versionForOtherFile2)]) newFileInfo
-    --       result = compareDb updateLocalDb otherDb
-    --   (sort (result Map.! Update)) `shouldBe` (sort [file1, file2])
+    it "keep on update when old file change on server" $ do
+      let newHash = "newHash"
+          newFileInfo = Map.fromList [(file1, newHash)
+                                     ,(file2, newHash)]
+          otherDb = Database orid otherVersion (Map.fromList [((file1, orid), otherVersion)
+                                        ,((file1, lrid), versionForLocalFile1)
+                                        ,((file2, lrid), versionForLocalFile2)
+                                        ,((file2, orid), otherVersion)]) localOriginFileInfo
+          localDb = Database lrid currentVersion localVersionInfo newFileInfo
+
+          result = compareDb localDb otherDb
+      (sort (result Map.! Update)) `shouldBe` (sort [file1, file2])
+
+    it "keep on same when old file delete on client" $ do
+      let newFileInfo = Map.fromList []
+          localDb = Database lrid currentVersion (Map.fromList [((file1, lrid), currentVersion)
+                                        ,((file1, orid), versionForLocalFile1)
+                                        ,((file2, lrid), currentVersion)]) newFileInfo
+          otherDb = Database orid otherVersion localVersionInfo localOriginFileInfo
+
+          result = compareDb localDb otherDb
+      (sort (result Map.! Same)) `shouldBe` (sort [file1, file2])
+
+    it "keep on delete when old file delete on server" $ do
+      let newFileInfo = Map.fromList []
+          otherDb = Database orid otherVersion (Map.fromList [((file1, orid), otherVersion)
+                                        ,((file1, lrid), versionForLocalFile1)
+                                        ,((file2, lrid), versionForLocalFile2)
+                                        ,((file2, orid), otherVersion)]) newFileInfo
+          localDb = Database lrid currentVersion localVersionInfo localOriginFileInfo
+
+          result = compareDb localDb otherDb
+      (sort (result Map.! Delete)) `shouldBe` (sort [file1, file2])
+
+
+--      (sort (result Map.! Update)) `shouldBe` (sort [file1, file2])
 
 
 
