@@ -109,9 +109,9 @@ compareDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
                                in if (ovFo > lvFo)
                                   then Update
                                   else Same
-    merge f (Just _) Nothing = let lvFl = findWithDefaultZero (f, lrid) lvis
-                                   ovFl = findWithDefaultZero (f, lrid) ovis
-                               in if (ovFl <= lvFl)
+    merge f (Just _) Nothing = let lvFo = findWithDefaultZero (f, orid) lvis
+                                   ovFo = findWithDefaultZero (f, orid) ovis
+                               in if (ovFo > lvFo)
                                   then Delete
                                   else Same
     merge f (Just c1) (Just c2)
