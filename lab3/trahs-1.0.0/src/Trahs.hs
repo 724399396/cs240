@@ -9,6 +9,7 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
+import qualified Data.Set as Set
 import           Data.Maybe               (fromJust, maybeToList)
 import           System.Directory
 import           System.Environment
@@ -109,11 +110,11 @@ compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
                                in if (ovFo > lvFo)
                                   then Update
                                   else Same
-    merge f (Just _) Nothing = let lvFo = findWithDefaultZero (f, orid) lvis
-                                   ovFo = findWithDefaultZero (f, orid) ovis
-                               in if (ovFo > lvFo)
-                                  then Delete
-                                  else Same
+    merge f (Just _) Nothing = let lvFi = findWithDefaultZero (f, lrid) lvis
+                                   ovFi = findWithDefaultZero (f, lrid) ovis
+                               in if (lvFi > ovFi)
+                                  then Same
+                                  else Delete
     merge f (Just c1) (Just c2)
       | c1 == c2 = Same
       | c1 /= c2 = let lvFo = findWithDefaultZero (f, orid) lvis
@@ -130,12 +131,24 @@ compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
     merge _ _ _ = error "not impossible"
 
 mergeDb :: Database -> Database -> Map.Map ChangeStatus [FilePath] -> Database
-mergeDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) changeStatus =
-  undefined
+mergeDb (Database lrid lvid lvis lfis) (Database orid _ ovis ofis) changeStatus =
+  Database lrid lvid updatedVis updatedFis
   where
     updateVis :: VersionInfo -> (FilePath, ReplicaId) -> Version -> VersionInfo
     updateVis m (f, inputRid) v | inputRid == orid = Map.insert (f, orid) v m
+                                | otherwise        = m
     updatedVis = Map.foldlWithKey updateVis lvis ovis
+    updateFis :: FileInfo -> ChangeStatus -> [FilePath] -> FileInfo
+    updateFis fi Same _ = fi
+    updateFis fi Update fs = foldl' (\fi' f' -> Map.insert f' (ofis Map.! f') fi') fi fs
+    updateFis fi Delete fs = Map.withoutKeys fi (Set.fromList fs)
+    updateFis fi Conflict fs = let
+      removeOrigined = Map.withoutKeys fi (Set.fromList fs)
+      insertRConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (ofis Map.! f') ++ (show $ ovis Map.! (f',orid))) (ofis Map.! f') fi') removeOrigined fs
+      insertLConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (lfis Map.! f') ++ (show $ lvis Map.! (f',lrid))) (lfis Map.! f') fi') insertRConflict fs
+      in
+        insertLConflict
+    updatedFis = Map.foldlWithKey updateFis lfis changeStatus
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
