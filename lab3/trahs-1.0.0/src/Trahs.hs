@@ -97,7 +97,7 @@ sendDbToClient db h = hPutStrLn h (show db)
 data ChangeStatus = Same | Update | Delete | Conflict deriving (Show, Eq, Ord)
 
 compareDb :: Database -> Database -> Map.Map ChangeStatus [FilePath]
-compareDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
+compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
    foldl (\acc (f, status) -> Map.insertWith (++) status [f] acc) Map.empty allMergeInfo
   where
     allMergeInfo :: [(FilePath, ChangeStatus)]
@@ -126,7 +126,16 @@ compareDb (Database lrid lv lvis lfis) (Database orid _ ovis ofis) =
                         (EQ, _) -> Same
                         (GT, EQ) -> Update
                         (GT, LT) -> Conflict
+                        _ -> error "not impossible"
     merge _ _ _ = error "not impossible"
+
+mergeDb :: Database -> Database -> Map.Map ChangeStatus [FilePath] -> Database
+mergeDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) changeStatus =
+  undefined
+  where
+    updateVis :: VersionInfo -> (FilePath, ReplicaId) -> Version -> VersionInfo
+    updateVis m (f, inputRid) v | inputRid == orid = Map.insert (f, orid) v m
+    updatedVis = Map.foldlWithKey updateVis lvis ovis
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
@@ -143,6 +152,7 @@ client turn r w dir = do
   line <- hGetLine r
   hPutStrLn stderr $ "The server send database " ++ show line
   let serverDb = (read line) :: Database
+      compareResult = compareDb db serverDb
   hPutStrLn w "Hello, server"
   line' <- hGetLine r
   hPutStrLn stderr $ "The server said " ++ show line'
