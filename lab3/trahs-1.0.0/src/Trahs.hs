@@ -9,8 +9,8 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
-import qualified Data.Set as Set
-import           Data.Maybe               (fromJust, maybeToList)
+import           Data.Maybe               (maybeToList)
+import qualified Data.Set                 as Set
 import           System.Directory
 import           System.Environment
 import           System.Exit
@@ -97,9 +97,9 @@ sendDbToClient db h = hPutStrLn h (show db)
 
 data ChangeStatus = Same | Update | Delete | Conflict deriving (Show, Eq, Ord)
 
-compareDb :: Database -> Database -> Map.Map ChangeStatus [FilePath]
+compareDb :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath)
 compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
-   foldl (\acc (f, status) -> Map.insertWith (++) status [f] acc) Map.empty allMergeInfo
+   foldl (\acc (f, status) -> Map.insertWith Set.union status (Set.singleton f) acc) Map.empty allMergeInfo
   where
     allMergeInfo :: [(FilePath, ChangeStatus)]
     allMergeInfo = map (\f -> (f, merge f (lfis Map.!? f) (ofis Map.!? f))) (nub $ Map.keys lfis ++ Map.keys ofis)
@@ -124,13 +124,13 @@ compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
                        oCompare = ovFo `compare` lvFo
                        lCompare = ovFl `compare` lvFl
                    in case (oCompare, lCompare) of
-                        (EQ, _) -> Same
+                        (EQ, _)  -> Same
                         (GT, EQ) -> Update
                         (GT, LT) -> Conflict
-                        _ -> error "not impossible"
+                        _        -> error "not impossible"
     merge _ _ _ = error "not impossible"
 
-mergeDb :: Database -> Database -> Map.Map ChangeStatus [FilePath] -> Database
+mergeDb :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> Database
 mergeDb (Database lrid lvid lvis lfis) (Database orid _ ovis ofis) changeStatus =
   Database lrid lvid updatedVis updatedFis
   where
@@ -138,12 +138,12 @@ mergeDb (Database lrid lvid lvis lfis) (Database orid _ ovis ofis) changeStatus 
     updateVis m (f, inputRid) v | inputRid == orid = Map.insert (f, orid) v m
                                 | otherwise        = m
     updatedVis = Map.foldlWithKey updateVis lvis ovis
-    updateFis :: FileInfo -> ChangeStatus -> [FilePath] -> FileInfo
+    updateFis :: FileInfo -> ChangeStatus -> Set.Set FilePath -> FileInfo
     updateFis fi Same _ = fi
     updateFis fi Update fs = foldl' (\fi' f' -> Map.insert f' (ofis Map.! f') fi') fi fs
-    updateFis fi Delete fs = Map.withoutKeys fi (Set.fromList fs)
+    updateFis fi Delete fs = Map.withoutKeys fi fs
     updateFis fi Conflict fs = let
-      removeOrigined = Map.withoutKeys fi (Set.fromList fs)
+      removeOrigined = Map.withoutKeys fi fs
       insertRConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (ofis Map.! f') ++ (show $ ovis Map.! (f',orid))) (ofis Map.! f') fi') removeOrigined fs
       insertLConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (lfis Map.! f') ++ (show $ lvis Map.! (f',lrid))) (lfis Map.! f') fi') insertRConflict fs
       in
@@ -157,6 +157,7 @@ server r w dir = do
   sendDbToClient db w
   line <- hGetLine r
   -- maybe turn to client mode
+
   hPutStrLn w $ "You said " ++ line
 
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
