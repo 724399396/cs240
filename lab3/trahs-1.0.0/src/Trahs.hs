@@ -131,17 +131,17 @@ compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
     merge _ _ _ = error "not impossible"
 
 mergeDb :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> Database
-mergeDb (Database lrid lvid lvis lfis) (Database orid _ ovis ofis) changeStatus =
+mergeDb (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStatus =
   Database lrid lvid updatedVis updatedFis
   where
     updateVis :: VersionInfo -> ChangeStatus -> Set.Set FilePath -> VersionInfo
-    updateVis vi Same _ = vi
+    updateVis vi Same fs = foldl' (\vi' f' -> maybe vi' (\v' -> Map.insert (f', orid) v' vi') (ovis Map.!? (f', orid))) vi fs
     updateVis vi Update fs = foldl' (\vi' f' -> Map.insert (f', orid) (ovis Map.! (f', orid)) vi') vi fs
     updateVis vi Delete fs = foldl' (\vi' f' -> Map.insert (f', orid) (ovis Map.! (f', orid)) vi') vi fs
     updateVis vi Conflict fs = let
       removeOrigined = Map.filterWithKey (\(f',_) _ -> f' `Set.notMember` fs) vi
-      insertRConflict = foldl' (\vi' f' -> Map.insert ((f' ++ "#" ++ (show $ ovis Map.! (f',orid)) ++ "." ++ (show orid)), lrid) (lvis Map.! (f',lrid)) vi') removeOrigined fs
-      insertLConflict = foldl' (\vi' f' -> Map.insert ((f' ++ "#" ++ (show $ lvis Map.! (f',lrid)) ++ "." ++ (show lrid)), lrid) (lvis Map.! (f',lrid)) vi') insertRConflict fs
+      insertRConflict = foldl' (\vi' f' -> Map.insert ((f' ++ "#" ++ (show orid)  ++ "." ++ (show ovid)), orid) ovid vi') removeOrigined fs
+      insertLConflict = foldl' (\vi' f' -> Map.insert ((f' ++ "#" ++ (show lrid)  ++ "." ++ (show lvid)), lrid) lvid vi') insertRConflict fs
       in
         insertLConflict
     updatedVis = Map.foldlWithKey updateVis lvis changeStatus
@@ -151,8 +151,8 @@ mergeDb (Database lrid lvid lvis lfis) (Database orid _ ovis ofis) changeStatus 
     updateFis fi Delete fs = Map.withoutKeys fi fs
     updateFis fi Conflict fs = let
       removeOrigined = Map.withoutKeys fi fs
-      insertRConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (show $ ovis Map.! (f',orid)) ++ "." ++ (show orid)) (ofis Map.! f') fi') removeOrigined fs
-      insertLConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (show $ lvis Map.! (f',lrid)) ++ "." ++ (show lrid)) (lfis Map.! f') fi') insertRConflict fs
+      insertRConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (show orid) ++ "." ++ (show ovid)) (ofis Map.! f') fi') removeOrigined fs
+      insertLConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (show lrid) ++ "." ++ (show lvid)) (lfis Map.! f') fi') insertRConflict fs
       in
         insertLConflict
     updatedFis = Map.foldlWithKey updateFis lfis changeStatus

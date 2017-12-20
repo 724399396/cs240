@@ -220,29 +220,31 @@ main = hspec $ describe "Testing Lab 3" $ do
     it "keep on conflict when update on client and update on server" $ do
       let newHash1 = "newHash1"
           newHash2 = "newHash2"
+          newHash3 = "newHash3"
+          newHash4 = "newHash4"
           newFileInfo1 = Map.fromList [("file1", newHash1)
-                                      ,("file2", newHash1)]
-          newFileInfo2 = Map.fromList [("file1", newHash2)
                                       ,("file2", newHash2)]
+          newFileInfo2 = Map.fromList [("file1", newHash3)
+                                      ,("file2", newHash4)]
           localDb = Database lrid currentVersion (Map.fromList [((file1, orid), versionForOtherFile1)
                                         ,((file1, lrid), currentVersion)
-                                        ,((file2, lrid), currentVersion)]) newFileInfo2
+                                        ,((file2, lrid), currentVersion)]) newFileInfo1
           otherDb = Database orid otherVersion (Map.fromList [((file1, orid), otherVersion)
                                         ,((file1, lrid), versionForLocalFile1)
                                         ,((file2, lrid), versionForLocalFile2)
-                                        ,((file2, orid), otherVersion)]) newFileInfo1
+                                        ,((file2, orid), otherVersion)]) newFileInfo2
           compareResult = compareDb localDb otherDb
           mergeResult = mergeDb localDb otherDb compareResult
           file1ConflictPart1 = file1 ++ "#" ++ (show lrid) ++ "." ++ (show currentVersion)
           file1ConflictPart2 = file1 ++ "#" ++ (show orid) ++ "." ++ (show otherVersion)
-          file2ConflictPart1 = file1 ++ "#" ++ (show lrid) ++ "." ++ (show currentVersion)
-          file2ConflictPart2 = file1 ++ "#" ++ (show orid) ++ "." ++ (show otherVersion)
+          file2ConflictPart1 = file2 ++ "#" ++ (show lrid) ++ "." ++ (show currentVersion)
+          file2ConflictPart2 = file2 ++ "#" ++ (show orid) ++ "." ++ (show otherVersion)
       compareResult `shouldBe` Map.singleton Conflict (Set.fromList [file1, file2])
       mergeResult `shouldBe` Database lrid currentVersion (Map.fromList [((file1ConflictPart1, lrid), currentVersion)
-                                                                        ,((file1ConflictPart2, lrid), currentVersion)
+                                                                        ,((file1ConflictPart2, orid), otherVersion)
                                                                         ,((file2ConflictPart1, lrid), currentVersion)
-                                                                        ,((file2ConflictPart2, lrid), currentVersion)])
+                                                                        ,((file2ConflictPart2, orid), otherVersion)])
         (Map.fromList [(file1ConflictPart1, newHash1)
-                      ,(file1ConflictPart2, newHash2)
-                      ,(file2ConflictPart1, newHash1)
-                      ,(file2ConflictPart2, newHash2)])
+                      ,(file1ConflictPart2, newHash3)
+                      ,(file2ConflictPart1, newHash2)
+                      ,(file2ConflictPart2, newHash4)])
