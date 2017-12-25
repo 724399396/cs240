@@ -65,11 +65,11 @@ mergeLocalInfo :: Database -> FileInfo -> Database
 mergeLocalInfo (Database rid vid vis fis) nfis =
   Database rid vid finalVis nfis
   where
-    calVersionCurrentReplica :: Maybe (Version, Hash) -> Maybe Hash -> Maybe Version
-    calVersionCurrentReplica (Just _) Nothing = Just vid
-    calVersionCurrentReplica Nothing (Just _) = Just vid
-    calVersionCurrentReplica (Just (ovid, c1)) (Just c2) = Just $ if (c1 == c2) then ovid else vid
-    calVersionCurrentReplica _ _ = error "not complete calVersionCurrentReplica"
+    calVersionCurrentReplica :: Maybe (Version, Hash) -> Maybe Hash -> Version
+    calVersionCurrentReplica (Just _) Nothing = vid
+    calVersionCurrentReplica Nothing (Just _) = vid
+    calVersionCurrentReplica (Just (ovid, c1)) (Just c2) = if (c1 == c2) then ovid else vid
+    calVersionCurrentReplica _ _ = error "not impossible"
 
     findFileLocalVersion :: FilePath -> Maybe (Version, Hash)
     findFileLocalVersion f = (,) <$> vis Map.!? (f, rid) <*> fis Map.!? f
@@ -77,10 +77,10 @@ mergeLocalInfo (Database rid vid vis fis) nfis =
     findFileOtherVersion :: FilePath -> [((FilePath, ReplicaId), Version)]
     findFileOtherVersion f = filter (\((f',rid'), _) -> f == f' && rid /= rid') (Map.assocs vis)
 
-    calVersionInfo :: FilePath -> Maybe Hash -> [((FilePath,ReplicaId),Version)]
-    calVersionInfo f nc = (maybeToList ((,) (f,rid) <$> calVersionCurrentReplica (findFileLocalVersion f) nc)) ++ findFileOtherVersion f
+    calVersionInfo :: FilePath -> [((FilePath,ReplicaId),Version)]
+    calVersionInfo f = ((f,rid), calVersionCurrentReplica (findFileLocalVersion f) (nfis Map.!? f)) : (findFileOtherVersion f)
     finalVis :: Map.Map (FilePath, ReplicaId) Version
-    finalVis = Map.fromList (join $ map (\f -> calVersionInfo f (nfis Map.!? f)) (nub $ Map.keys nfis ++ Map.keys fis))
+    finalVis = Map.fromList (join $ map (\f -> calVersionInfo f) (nub $ Map.keys nfis ++ Map.keys fis))
 
 syncLocalDb :: FilePath -> IO Database
 syncLocalDb dir = do db <- localDatabase dir
@@ -99,8 +99,8 @@ compareDb :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath)
 compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
    foldl (\acc (f, status) -> Map.insertWith Set.union status (Set.singleton f) acc) Map.empty allMergeInfo
   where
-    allMergeInfo :: [(FilePath, ChangeStatus)]
-    allMergeInfo = map (\f -> (f, merge f (lfis Map.!? f) (ofis Map.!? f))) (nub $ Map.keys lfis ++ Map.keys ofis)
+    allMergeInfo :: Set.Set (FilePath, ChangeStatus)
+    allMergeInfo = Set.map (\f -> (f, merge f (lfis Map.!? f) (ofis Map.!? f))) (Map.keysSet lfis `Set.union` Map.keysSet ofis)
     findWithDefaultZero = Map.findWithDefault (Version 0)
     merge :: FilePath -> Maybe Hash -> Maybe Hash -> ChangeStatus
     merge f Nothing (Just _) = let lvFo = findWithDefaultZero (f, orid) lvis
@@ -128,6 +128,9 @@ compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
                         _        -> error "not impossible"
     merge _ _ _ = error "not impossible"
 
+conflictFileName :: FilePath -> ReplicaId -> Version -> FilePath
+conflictFileName f (ReplicaId r) (Version v) = (f ++ "#" ++ (show r) ++ "." ++ (show v))
+
 mergeDb :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> Database
 mergeDb (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStatus =
   Database lrid lvid updatedVis updatedFis
@@ -138,10 +141,9 @@ mergeDb (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStat
     updateVis vi Delete fs = foldl' (\vi' f' -> Map.insert (f', orid) (ovis Map.! (f', orid)) vi') vi fs
     updateVis vi Conflict fs = let
       removeOrigined = Map.filterWithKey (\(f',_) _ -> f' `Set.notMember` fs) vi
-      insertRConflict = foldl' (\vi' f' -> Map.insert ((f' ++ "#" ++ (show orid)  ++ "." ++ (show ovid)), orid) ovid vi') removeOrigined fs
-      insertLConflict = foldl' (\vi' f' -> Map.insert ((f' ++ "#" ++ (show lrid)  ++ "." ++ (show lvid)), lrid) lvid vi') insertRConflict fs
+      insertConflict = foldl' (\vi' f' -> Map.insert (conflictFileName f' lrid lvid, lrid) lvid $ Map.insert (conflictFileName f' orid ovid, lrid) lvid vi') removeOrigined fs
       in
-        insertLConflict
+        insertConflict
     updatedVis = Map.foldlWithKey updateVis lvis changeStatus
     updateFis :: FileInfo -> ChangeStatus -> Set.Set FilePath -> FileInfo
     updateFis fi Same _ = fi
@@ -149,44 +151,50 @@ mergeDb (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStat
     updateFis fi Delete fs = Map.withoutKeys fi fs
     updateFis fi Conflict fs = let
       removeOrigined = Map.withoutKeys fi fs
-      insertRConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (show orid) ++ "." ++ (show ovid)) (ofis Map.! f') fi') removeOrigined fs
-      insertLConflict = foldl' (\fi' f' -> Map.insert (f' ++ "#" ++ (show lrid) ++ "." ++ (show lvid)) (lfis Map.! f') fi') insertRConflict fs
+      insertConflict = foldl' (\fi' f' -> Map.insert (conflictFileName f' lrid lvid) (lfis Map.! f') $ Map.insert (conflictFileName f' orid ovid) (ofis Map.! f') fi') removeOrigined fs
       in
-        insertLConflict
+        insertConflict
     updatedFis = Map.foldlWithKey updateFis lfis changeStatus
 
 writeToExistFile :: Directory -> FilePath -> (Handle -> IO ()) -> IO ()
-writeToExistFile dir fileName act = withTempFile dir fileName $ (\nPath h ->
-                                                        do act h
-                                                           renameFile nPath (dir </> fileName))
+writeToExistFile dir fileName act =
+  withTempFile dir fileName $ (\nPath h ->
+                                  do act h
+                                     renameFile nPath (dir </> fileName))
 
-
--- syncFileFromServer :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> IO ()
--- syncFileFromServer (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStatus =
---   undefined
---   where
---     deleteFile :: Set.Set FilePath -> IO ()
---     deleteFile = mapM_ removeFile . Set.toList
---     downloadFile :: Handle -> Handle -> Directory -> FilePath -> IO ()
---     downloadFile r w dir fileName = do
---       hPutStrLn w fileName
---       contentLength <- (read <$> hGetLine r) :: IO Int
---       content <- mapM (const $ hGetChar r) [1..contentLength]
---       writeToExistFile dir fileName (\h -> hPutStrLn h content)
---     conflictFile :: Handle -> Handle -> Directory -> FilePath -> IO ()
---     conflictFile r w dir fileName = do
-
-
+syncFileFromServer :: Handle -> Handle -> Directory -> Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> IO ()
+syncFileFromServer r w dir (Database lrid lvid _ _) (Database orid ovid _ _) changeStatus =
+  mapM_ dispatch (Map.assocs changeStatus)
+  where
+    dispatch :: (ChangeStatus, Set.Set FilePath) -> IO ()
+    dispatch (Same,_) = return ()
+    dispatch (Delete,fs) = mapM_ removeFile $ Set.toList fs
+    dispatch (Update,fs) = mapM_ downloadFile $ Set.toList fs
+    dispatch (Conflict,fs) = mapM_ conflictFile $ Set.toList fs
+    readFromServer :: FilePath -> IO String
+    readFromServer fileName = do
+      hPutStrLn w fileName
+      contentLength <- (read <$> hGetLine r) :: IO Int
+      mapM (const $ hGetChar r) [1..contentLength]
+    downloadFile :: FilePath -> IO ()
+    downloadFile fileName = do
+      content <- readFromServer fileName
+      writeToExistFile dir fileName (\h -> hPutStrLn h content)
+    conflictFile :: FilePath -> IO ()
+    conflictFile fileName = do
+      lCon <- readFile (dir </> fileName)
+      oCon <- readFromServer fileName
+      writeFile (dir </> (conflictFileName fileName lrid lvid)) lCon
+      writeFile (dir </> (conflictFileName fileName orid ovid)) oCon
+      removeFile (dir </> fileName)
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
   db <- syncLocalDb dir
   syncDbToDisk dir db
   sendDbToClient db w
-  line <- hGetLine r
   -- maybe turn to client mode
-
-  hPutStrLn w $ "You said " ++ line
+  client False r w dir
 
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
@@ -195,10 +203,13 @@ client turn r w dir = do
   hPutStrLn stderr $ "The server send database " ++ show line
   let serverDb = (read line) :: Database
       compareResult = compareDb db serverDb
-  hPutStrLn w "Hello, server"
-  line' <- hGetLine r
-  hPutStrLn stderr $ "The server said " ++ show line'
+      mergeResult = mergeDb db serverDb compareResult
+  writeFile (dir </> dbFile) (show mergeResult)
+  syncFileFromServer r w dir db serverDb compareResult
   -- if turn, turn to server
+  if turn
+    then server r w dir
+    else return ()
 
 hostCmd :: String -> FilePath -> IO String
 hostCmd host dir = do

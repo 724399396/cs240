@@ -235,15 +235,16 @@ main = hspec $ describe "Testing Lab 3" $ do
                                         ,((file2, orid), otherVersion)]) newFileInfo2
           compareResult = compareDb localDb otherDb
           mergeResult = mergeDb localDb otherDb compareResult
-          file1ConflictPart1 = file1 ++ "#" ++ (show lrid) ++ "." ++ (show currentVersion)
-          file1ConflictPart2 = file1 ++ "#" ++ (show orid) ++ "." ++ (show otherVersion)
-          file2ConflictPart1 = file2 ++ "#" ++ (show lrid) ++ "." ++ (show currentVersion)
-          file2ConflictPart2 = file2 ++ "#" ++ (show orid) ++ "." ++ (show otherVersion)
+          (ReplicaId lrid', ReplicaId orid', Version currentVersion', Version otherVersion') = (lrid, orid, currentVersion, otherVersion)
+          file1ConflictPart1 = file1 ++ "#" ++ (show lrid') ++ "." ++ (show currentVersion')
+          file1ConflictPart2 = file1 ++ "#" ++ (show orid') ++ "." ++ (show otherVersion')
+          file2ConflictPart1 = file2 ++ "#" ++ (show lrid') ++ "." ++ (show currentVersion')
+          file2ConflictPart2 = file2 ++ "#" ++ (show orid') ++ "." ++ (show otherVersion')
       compareResult `shouldBe` Map.singleton Conflict (Set.fromList [file1, file2])
       mergeResult `shouldBe` Database lrid currentVersion (Map.fromList [((file1ConflictPart1, lrid), currentVersion)
-                                                                        ,((file1ConflictPart2, orid), otherVersion)
+                                                                        ,((file1ConflictPart2, lrid), currentVersion)
                                                                         ,((file2ConflictPart1, lrid), currentVersion)
-                                                                        ,((file2ConflictPart2, orid), otherVersion)])
+                                                                        ,((file2ConflictPart2, lrid), currentVersion)])
         (Map.fromList [(file1ConflictPart1, newHash1)
                       ,(file1ConflictPart2, newHash3)
                       ,(file2ConflictPart1, newHash2)
