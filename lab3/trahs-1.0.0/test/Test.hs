@@ -43,8 +43,8 @@ main = hspec $ describe "Testing Lab 3" $ do
         localVersionInfo = Map.fromList [((file1, lrid), versionForLocalFile1)
                                         ,((file1, orid), versionForOtherFile1)
                                         ,((file2, lrid), versionForLocalFile2)]
-        file1Hash = "hash1"
-        file2Hash = "hash2"
+        file1Hash = Hash "hash1"
+        file2Hash = Hash "hash2"
         localOriginFileInfo = Map.fromList [(file1, file1Hash)
                                            ,(file2, file2Hash)]
         localDb = Database lrid currentVersion localVersionInfo localOriginFileInfo
@@ -53,7 +53,7 @@ main = hspec $ describe "Testing Lab 3" $ do
       ndb `shouldBe` localDb
 
     it "increase current replica version and keep other replica version when old file change" $ do
-      let newHash = "newHash"
+      let newHash = Hash "newHash"
           newFileInfo = Map.fromList [(file1, newHash)
                                      ,(file2, newHash)]
           ndb = mergeLocalInfo localDb newFileInfo
@@ -70,7 +70,7 @@ main = hspec $ describe "Testing Lab 3" $ do
 
     it "add new file version when add file" $ do
       let file3 = "file3"
-          file3Hash = "file3Hash"
+          file3Hash = Hash "file3Hash"
           newFileInfo = Map.fromList [(file1, file1Hash)
                                      ,(file2, file2Hash)
                                      ,(file3, file3Hash)]
@@ -94,9 +94,9 @@ main = hspec $ describe "Testing Lab 3" $ do
         localVersionInfo = Map.fromList [((file1, lrid), versionForLocalFile1)
                                         ,((file1, orid), versionForOtherFile1)
                                         ,((file2, lrid), versionForLocalFile2)]
-        file1Hash = "hash1"
-        file2Hash = "hash2"
-        newHash = "newHash"
+        file1Hash = Hash "hash1"
+        file2Hash = Hash "hash2"
+        newHash = Hash "newHash"
         localOriginFileInfo = Map.fromList [(file1, file1Hash)
                                            ,(file2, file2Hash)]
     it "keep on same key when file not change" $ do
@@ -218,10 +218,10 @@ main = hspec $ describe "Testing Lab 3" $ do
                                                                         ,((file2, orid), otherVersion)]) otherNewFileInfo
 
     it "keep on conflict when update on client and update on server" $ do
-      let newHash1 = "newHash1"
-          newHash2 = "newHash2"
-          newHash3 = "newHash3"
-          newHash4 = "newHash4"
+      let newHash1 = Hash "newHash1"
+          newHash2 = Hash "newHash2"
+          newHash3 = Hash "newHash3"
+          newHash4 = Hash "newHash4"
           newFileInfo1 = Map.fromList [("file1", newHash1)
                                       ,("file2", newHash2)]
           newFileInfo2 = Map.fromList [("file1", newHash3)

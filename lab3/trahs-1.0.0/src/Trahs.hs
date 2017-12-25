@@ -30,8 +30,9 @@ dbFile = ".trahs.db"
 type Directory = FilePath
 newtype ReplicaId = ReplicaId Int64 deriving (Show, Read, Eq, Ord, Bounded)
 newtype Version = Version Int64 deriving (Show, Read, Eq, Ord)
+newtype Hash = Hash String deriving (Show, Read, Eq, Ord)
 type VersionInfo = Map.Map (FilePath, ReplicaId) Version
-type FileInfo = Map.Map FilePath String
+type FileInfo = Map.Map FilePath Hash
 
 data Database = Database {
     _replicaId     :: ReplicaId
@@ -55,7 +56,7 @@ localFileInfo :: Directory -> IO FileInfo
 localFileInfo dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
-  Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, h)) watchFile)
+  Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, Hash h)) watchFile)
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
     fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
@@ -64,19 +65,19 @@ mergeLocalInfo :: Database -> FileInfo -> Database
 mergeLocalInfo (Database rid vid vis fis) nfis =
   Database rid vid finalVis nfis
   where
-    calVersionCurrentReplica :: Maybe (Version, String) -> Maybe String -> Maybe Version
+    calVersionCurrentReplica :: Maybe (Version, Hash) -> Maybe Hash -> Maybe Version
     calVersionCurrentReplica (Just _) Nothing = Just vid
     calVersionCurrentReplica Nothing (Just _) = Just vid
     calVersionCurrentReplica (Just (ovid, c1)) (Just c2) = Just $ if (c1 == c2) then ovid else vid
     calVersionCurrentReplica _ _ = error "not complete calVersionCurrentReplica"
 
-    findFileLocalVersion :: FilePath -> Maybe (Version, String)
+    findFileLocalVersion :: FilePath -> Maybe (Version, Hash)
     findFileLocalVersion f = (,) <$> vis Map.!? (f, rid) <*> fis Map.!? f
 
     findFileOtherVersion :: FilePath -> [((FilePath, ReplicaId), Version)]
     findFileOtherVersion f = filter (\((f',rid'), _) -> f == f' && rid /= rid') (Map.assocs vis)
 
-    calVersionInfo :: FilePath -> Maybe String -> [((FilePath,ReplicaId),Version)]
+    calVersionInfo :: FilePath -> Maybe Hash -> [((FilePath,ReplicaId),Version)]
     calVersionInfo f nc = (maybeToList ((,) (f,rid) <$> calVersionCurrentReplica (findFileLocalVersion f) nc)) ++ findFileOtherVersion f
     finalVis :: Map.Map (FilePath, ReplicaId) Version
     finalVis = Map.fromList (join $ map (\f -> calVersionInfo f (nfis Map.!? f)) (nub $ Map.keys nfis ++ Map.keys fis))
@@ -87,10 +88,7 @@ syncLocalDb dir = do db <- localDatabase dir
                      return $ mergeLocalInfo db fi
 
 syncDbToDisk :: FilePath -> Database -> IO ()
-syncDbToDisk dir db =
-  do withTempFile dir dbFile $ (\nPath h ->
-         do hPutStr h (show db)
-            renameFile nPath (dir </> dbFile))
+syncDbToDisk dir db = writeToExistFile dir dbFile (\h -> hPutStr h (show db))
 
 sendDbToClient :: Database -> Handle -> IO ()
 sendDbToClient db h = hPutStrLn h (show db)
@@ -104,7 +102,7 @@ compareDb (Database lrid _ lvis lfis) (Database orid _ ovis ofis) =
     allMergeInfo :: [(FilePath, ChangeStatus)]
     allMergeInfo = map (\f -> (f, merge f (lfis Map.!? f) (ofis Map.!? f))) (nub $ Map.keys lfis ++ Map.keys ofis)
     findWithDefaultZero = Map.findWithDefault (Version 0)
-    merge :: FilePath -> Maybe String -> Maybe String -> ChangeStatus
+    merge :: FilePath -> Maybe Hash -> Maybe Hash -> ChangeStatus
     merge f Nothing (Just _) = let lvFo = findWithDefaultZero (f, orid) lvis
                                    ovFo = findWithDefaultZero (f, orid) ovis
                                in if (ovFo > lvFo)
@@ -156,6 +154,29 @@ mergeDb (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStat
       in
         insertLConflict
     updatedFis = Map.foldlWithKey updateFis lfis changeStatus
+
+writeToExistFile :: Directory -> FilePath -> (Handle -> IO ()) -> IO ()
+writeToExistFile dir fileName act = withTempFile dir fileName $ (\nPath h ->
+                                                        do act h
+                                                           renameFile nPath (dir </> fileName))
+
+
+-- syncFileFromServer :: Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> IO ()
+-- syncFileFromServer (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStatus =
+--   undefined
+--   where
+--     deleteFile :: Set.Set FilePath -> IO ()
+--     deleteFile = mapM_ removeFile . Set.toList
+--     downloadFile :: Handle -> Handle -> Directory -> FilePath -> IO ()
+--     downloadFile r w dir fileName = do
+--       hPutStrLn w fileName
+--       contentLength <- (read <$> hGetLine r) :: IO Int
+--       content <- mapM (const $ hGetChar r) [1..contentLength]
+--       writeToExistFile dir fileName (\h -> hPutStrLn h content)
+--     conflictFile :: Handle -> Handle -> Directory -> FilePath -> IO ()
+--     conflictFile r w dir fileName = do
+
+
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
