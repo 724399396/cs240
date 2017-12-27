@@ -9,7 +9,6 @@ import qualified Data.ByteString.Lazy     as L
 import           Data.Int
 import           Data.List
 import qualified Data.Map.Strict          as Map
-import           Data.Maybe               (maybeToList)
 import qualified Data.Set                 as Set
 import           System.Directory
 import           System.Environment
@@ -33,6 +32,7 @@ newtype Version = Version Int64 deriving (Show, Read, Eq, Ord)
 newtype Hash = Hash String deriving (Show, Read, Eq, Ord)
 type VersionInfo = Map.Map (FilePath, ReplicaId) Version
 type FileInfo = Map.Map FilePath Hash
+type FileContent = Map.Map FilePath L.ByteString
 
 data Database = Database {
     _replicaId     :: ReplicaId
@@ -43,6 +43,8 @@ data Database = Database {
 
 makeLenses ''Database
 
+data DbWithContent = DbWithContent Database FileContent deriving (Show, Read)
+
 -- sync local db
 localDatabase :: Directory -> IO Database
 localDatabase dir = do files <- getDirectoryContents dir
@@ -52,14 +54,16 @@ localDatabase dir = do files <- getDirectoryContents dir
     generateReplicaId = getStdRandom $ randomR (minBound:: Int64, maxBound :: Int64)
     initDB = generateReplicaId >>= (\rid -> return $ Database (ReplicaId rid) (Version 0) Map.empty Map.empty)
 
-localFileInfo :: Directory -> IO FileInfo
+localFileInfo :: Directory -> IO (FileInfo, FileContent)
 localFileInfo dir = do
   files <- getDirectoryContents dir
   watchFile <- filterM (\f -> isFile (dir </> f) >>= return . (&& f /= dbFile)) files
-  Map.fromList <$> (mapM (\f -> fileHash (dir </> f) >>= \h -> return (f, Hash h)) watchFile)
+  fc <- mapM (\f -> L.readFile (dir </> f) >>= return . (,) f) watchFile
+  return $ (,) (Map.fromList $ map (\(f,c) -> (f, Hash $ fileHash c)) fc)
+               (Map.fromList $ fc)
   where
     isFile f = isRegularFile <$> getSymbolicLinkStatus f
-    fileHash path = showBSasHex <$> (hash SHA256 <$> L.readFile path)
+    fileHash = showBSasHex . hash SHA256
 
 mergeLocalInfo :: Database -> FileInfo -> Database
 mergeLocalInfo (Database rid vid vis fis) nfis =
@@ -82,15 +86,15 @@ mergeLocalInfo (Database rid vid vis fis) nfis =
     finalVis :: Map.Map (FilePath, ReplicaId) Version
     finalVis = Map.fromList (join $ map (\f -> calVersionInfo f) (nub $ Map.keys nfis ++ Map.keys fis))
 
-syncLocalDb :: FilePath -> IO Database
+syncLocalDb :: FilePath -> IO (Database, FileContent)
 syncLocalDb dir = do db <- localDatabase dir
-                     fi <- localFileInfo dir
-                     return $ mergeLocalInfo db fi
+                     (fi, fc) <- localFileInfo dir
+                     return $ (mergeLocalInfo db fi, fc)
 
 syncDbToDisk :: FilePath -> Database -> IO ()
 syncDbToDisk dir db = writeToExistFile dir dbFile (\h -> hPutStr h (show db))
 
-sendDbToClient :: Database -> Handle -> IO ()
+sendDbToClient :: DbWithContent -> Handle -> IO ()
 sendDbToClient db h = hPutStrLn h (show db)
 
 data ChangeStatus = Same | Update | Delete | Conflict deriving (Show, Eq, Ord)
@@ -162,8 +166,8 @@ writeToExistFile dir fileName act =
                                   do act h
                                      renameFile nPath (dir </> fileName))
 
-syncFileFromServer :: Handle -> Handle -> Directory -> Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> IO ()
-syncFileFromServer r w dir (Database lrid lvid _ _) (Database orid ovid _ _) changeStatus =
+syncFileFromServer :: FileContent -> Directory -> Database -> Database -> Map.Map ChangeStatus (Set.Set FilePath) -> IO ()
+syncFileFromServer fc dir (Database lrid lvid _ _) (Database orid ovid _ _) changeStatus =
   mapM_ dispatch (Map.assocs changeStatus)
   where
     dispatch :: (ChangeStatus, Set.Set FilePath) -> IO ()
@@ -171,45 +175,41 @@ syncFileFromServer r w dir (Database lrid lvid _ _) (Database orid ovid _ _) cha
     dispatch (Delete,fs) = mapM_ removeFile $ Set.toList fs
     dispatch (Update,fs) = mapM_ downloadFile $ Set.toList fs
     dispatch (Conflict,fs) = mapM_ conflictFile $ Set.toList fs
-    readFromServer :: FilePath -> IO String
-    readFromServer fileName = do
-      hPutStrLn w fileName
-      contentLength <- (read <$> hGetLine r) :: IO Int
-      mapM (const $ hGetChar r) [1..contentLength]
+    readFromServer :: FilePath -> L.ByteString
+    readFromServer fileName = fc Map.! fileName
     downloadFile :: FilePath -> IO ()
     downloadFile fileName = do
-      content <- readFromServer fileName
-      writeToExistFile dir fileName (\h -> hPutStrLn h content)
+      writeToExistFile dir fileName (\h -> L.hPutStr h (readFromServer fileName))
     conflictFile :: FilePath -> IO ()
     conflictFile fileName = do
-      lCon <- readFile (dir </> fileName)
-      oCon <- readFromServer fileName
-      writeFile (dir </> (conflictFileName fileName lrid lvid)) lCon
-      writeFile (dir </> (conflictFileName fileName orid ovid)) oCon
+      lCon <- L.readFile (dir </> fileName)
+      let oCon = readFromServer fileName
+      L.writeFile (dir </> (conflictFileName fileName lrid lvid)) lCon
+      L.writeFile (dir </> (conflictFileName fileName orid ovid)) oCon
       removeFile (dir </> fileName)
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
-  db <- syncLocalDb dir
+  (db, fc) <- syncLocalDb dir
   syncDbToDisk dir db
-  sendDbToClient db w
+  sendDbToClient (DbWithContent db fc) w
   -- maybe turn to client mode
-  client False r w dir
+  -- client False r w dir
 
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
-  db <- syncLocalDb dir
+  (db, _) <- syncLocalDb dir
   line <- hGetLine r
   hPutStrLn stderr $ "The server send database " ++ show line
-  let serverDb = (read line) :: Database
+  let (DbWithContent serverDb fc) = read line
       compareResult = compareDb db serverDb
       mergeResult = mergeDb db serverDb compareResult
   writeFile (dir </> dbFile) (show mergeResult)
-  syncFileFromServer r w dir db serverDb compareResult
+  syncFileFromServer fc dir db serverDb compareResult
   -- if turn, turn to server
-  if turn
-    then server r w dir
-    else return ()
+  -- if turn
+  --   then server r w dir
+  --   else return ()
 
 hostCmd :: String -> FilePath -> IO String
 hostCmd host dir = do
