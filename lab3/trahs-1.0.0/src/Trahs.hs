@@ -193,8 +193,13 @@ server r w dir = do
   (db, fc) <- syncLocalDb dir
   syncDbToDisk dir db
   sendDbToClient (DbWithContent db fc) w
+  line <- hGetLine r
+  hPutStrLn stderr $ "The client ready: " ++ show line
   -- maybe turn to client mode
-  -- client False r w dir
+  if (read line)
+    then do hPutStrLn stderr $ "The server finish, become to client " ++ show dir
+            client False r w dir
+    else hPutStrLn stderr $ "The server finish." ++ show dir
 
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
@@ -204,12 +209,14 @@ client turn r w dir = do
   let (DbWithContent serverDb fc) = read line
       compareResult = compareDb db serverDb
       mergeResult = mergeDb db serverDb compareResult
-  writeFile (dir </> dbFile) (show mergeResult)
+  syncDbToDisk dir mergeResult
   syncFileFromServer fc dir db serverDb compareResult
   -- if turn, turn to server
-  -- if turn
-  --   then server r w dir
-  --   else return ()
+  hPutStrLn w (show turn)
+  if turn
+    then do hPutStrLn stderr $ "The client finish, become to server " ++ show dir
+            server r w dir
+    else hPutStrLn stderr $ "The client finish." ++ show dir
 
 hostCmd :: String -> FilePath -> IO String
 hostCmd host dir = do
