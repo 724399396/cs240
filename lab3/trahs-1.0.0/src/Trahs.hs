@@ -179,14 +179,16 @@ syncFileFromServer fc dir (Database lrid lvid _ _) (Database orid ovid _ _) chan
     readFromServer fileName = fc Map.! fileName
     downloadFile :: FilePath -> IO ()
     downloadFile fileName = do
+      hPutStrLn stderr $ "fetching \"" ++ show fileName ++ "\""
       writeToExistFile dir fileName (\h -> L.hPutStr h (readFromServer fileName))
     conflictFile :: FilePath -> IO ()
     conflictFile fileName = do
       lCon <- L.readFile (dir </> fileName)
       let oCon = readFromServer fileName
       L.writeFile (dir </> (conflictFileName fileName lrid lvid)) lCon
-      L.writeFile (dir </> (conflictFileName fileName orid ovid)) oCon
+      seq oCon $ L.writeFile (dir </> (conflictFileName fileName orid ovid)) oCon
       removeFile (dir </> fileName)
+      hPutStrLn stderr $ "conflicting \"" ++ show fileName ++ "\""
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
@@ -194,10 +196,9 @@ server r w dir = do
   syncDbToDisk dir db
   sendDbToClient (DbWithContent db fc) w
   line <- hGetLine r
-  hPutStrLn stderr $ "The client ready: " ++ show line
   -- maybe turn to client mode
   if (read line)
-    then do hPutStrLn stderr $ "The server finish, become to client " ++ show dir
+    then do hPutStrLn stderr $ "=== switching from client to server ===" ++ show dir
             client False r w dir
     else hPutStrLn stderr $ "The server finish." ++ show dir
 
@@ -205,7 +206,6 @@ client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
   (db, _) <- syncLocalDb dir
   line <- hGetLine r
-  hPutStrLn stderr $ "The server send database " ++ show line
   let (DbWithContent serverDb fc) = read line
       compareResult = compareDb db serverDb
       mergeResult = mergeDb db serverDb compareResult
@@ -214,7 +214,7 @@ client turn r w dir = do
   -- if turn, turn to server
   hPutStrLn w (show turn)
   if turn
-    then do hPutStrLn stderr $ "The client finish, become to server " ++ show dir
+    then do hPutStrLn stderr $ "=== switch from client to server ===" ++ show dir
             server r w dir
     else hPutStrLn stderr $ "The client finish." ++ show dir
 
