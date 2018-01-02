@@ -171,9 +171,9 @@ syncFileFromServer fc dir (Database lrid lvid _ _) (Database orid ovid _ _) chan
   mapM_ dispatch (Map.assocs changeStatus)
   where
     dispatch :: (ChangeStatus, Set.Set FilePath) -> IO ()
-    dispatch (Same,_) = return ()
-    dispatch (Delete,fs) = mapM_ removeFile $ Set.toList fs
-    dispatch (Update,fs) = mapM_ downloadFile $ Set.toList fs
+    dispatch (Same,_)      = return ()
+    dispatch (Delete,fs)   = mapM_ removeFile $ Set.toList fs
+    dispatch (Update,fs)   = mapM_ downloadFile $ Set.toList fs
     dispatch (Conflict,fs) = mapM_ conflictFile $ Set.toList fs
     readFromServer :: FilePath -> L.ByteString
     readFromServer fileName = fc Map.! fileName
@@ -198,7 +198,7 @@ server r w dir = do
   line <- hGetLine r
   -- maybe turn to client mode
   if (read line)
-    then do hPutStrLn stderr $ "=== switching from client to server ===" ++ show dir
+    then do hPutStrLn stderr "=== switching from client to server ==="
             client False r w dir
     else hPutStrLn stderr $ "The server finish." ++ show dir
 
@@ -214,7 +214,7 @@ client turn r w dir = do
   -- if turn, turn to server
   hPutStrLn w (show turn)
   if turn
-    then do hPutStrLn stderr $ "=== switch from client to server ===" ++ show dir
+    then do hPutStrLn stderr $ "=== switch from client to server ==="
             server r w dir
     else hPutStrLn stderr $ "The client finish." ++ show dir
 
