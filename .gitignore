@@ -6,5 +6,3 @@ cabal.sandbox.config
 *.o
 code/target
 .stack-work
-market
-garage

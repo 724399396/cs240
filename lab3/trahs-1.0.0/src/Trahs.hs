@@ -144,8 +144,8 @@ mergeDb (Database lrid lvid lvis lfis) (Database orid ovid ovis ofis) changeStat
     updateVis vi Update fs = foldl' (\vi' f' -> Map.insert (f', orid) (ovis Map.! (f', orid)) vi') vi fs
     updateVis vi Delete fs = foldl' (\vi' f' -> Map.insert (f', orid) (ovis Map.! (f', orid)) vi') vi fs
     updateVis vi Conflict fs = let
-      removeOrigined = Map.filterWithKey (\(f',_) _ -> f' `Set.notMember` fs) vi
-      insertConflict = foldl' (\vi' f' -> Map.insert (conflictFileName f' lrid lvid, lrid) lvid $ Map.insert (conflictFileName f' orid ovid, lrid) lvid vi') removeOrigined fs
+      updateOrigined = foldl' (\vi' f' -> Map.insert (f', orid) (ovis Map.! (f', orid)) vi') vi fs
+      insertConflict = foldl' (\vi' f' -> Map.insert (conflictFileName f' lrid lvid, lrid) lvid $ Map.insert (conflictFileName f' orid ovid, lrid) lvid vi') updateOrigined fs
       in
         insertConflict
     updatedVis = Map.foldlWithKey updateVis lvis changeStatus
@@ -172,14 +172,18 @@ syncFileFromServer fc dir (Database lrid lvid _ _) (Database orid ovid _ _) chan
   where
     dispatch :: (ChangeStatus, Set.Set FilePath) -> IO ()
     dispatch (Same,_)      = return ()
-    dispatch (Delete,fs)   = mapM_ removeFile $ Set.toList fs
+    dispatch (Delete,fs)   = mapM_ deleteFile $ Set.toList fs
     dispatch (Update,fs)   = mapM_ downloadFile $ Set.toList fs
     dispatch (Conflict,fs) = mapM_ conflictFile $ Set.toList fs
     readFromServer :: FilePath -> L.ByteString
     readFromServer fileName = fc Map.! fileName
+    deleteFile :: FilePath -> IO ()
+    deleteFile fileName = do
+      hPutStrLn stderr $ "fetching \"" ++ fileName ++ "\""
+      removeFile fileName
     downloadFile :: FilePath -> IO ()
     downloadFile fileName = do
-      hPutStrLn stderr $ "fetching \"" ++ show fileName ++ "\""
+      hPutStrLn stderr $ "fetching \"" ++ fileName ++ "\""
       writeToExistFile dir fileName (\h -> L.hPutStr h (readFromServer fileName))
     conflictFile :: FilePath -> IO ()
     conflictFile fileName = do
@@ -188,7 +192,7 @@ syncFileFromServer fc dir (Database lrid lvid _ _) (Database orid ovid _ _) chan
       L.writeFile (dir </> (conflictFileName fileName lrid lvid)) lCon
       seq oCon $ L.writeFile (dir </> (conflictFileName fileName orid ovid)) oCon
       removeFile (dir </> fileName)
-      hPutStrLn stderr $ "conflicting \"" ++ show fileName ++ "\""
+      hPutStrLn stderr $ "conflicting \"" ++ fileName ++ "\""
 
 server :: Handle -> Handle -> FilePath -> IO ()
 server r w dir = do
@@ -196,11 +200,10 @@ server r w dir = do
   syncDbToDisk dir db
   sendDbToClient (DbWithContent db fc) w
   line <- hGetLine r
-  -- maybe turn to client mode
   if (read line)
     then do hPutStrLn stderr "=== switching from client to server ==="
             client False r w dir
-    else hPutStrLn stderr $ "The server finish." ++ show dir
+    else return ()
 
 client :: Bool -> Handle -> Handle -> FilePath -> IO ()
 client turn r w dir = do
@@ -210,13 +213,12 @@ client turn r w dir = do
       compareResult = compareDb db serverDb
       mergeResult = mergeDb db serverDb compareResult
   syncDbToDisk dir mergeResult
-  syncFileFromServer fc dir db serverDb compareResult
-  -- if turn, turn to server
+  syncFileFromServer fc dir mergeResult serverDb compareResult
   hPutStrLn w (show turn)
   if turn
     then do hPutStrLn stderr $ "=== switch from client to server ==="
             server r w dir
-    else hPutStrLn stderr $ "The client finish." ++ show dir
+    else return ()
 
 hostCmd :: String -> FilePath -> IO String
 hostCmd host dir = do
