@@ -69,22 +69,9 @@ mergeLocalInfo :: Database -> FileInfo -> Database
 mergeLocalInfo (Database rid vid vis fis) nfis =
   Database rid vid finalVis nfis
   where
-    calVersionCurrentReplica :: Maybe (Version, Hash) -> Maybe Hash -> Version
-    calVersionCurrentReplica (Just _) Nothing = vid
-    calVersionCurrentReplica Nothing (Just _) = vid
-    calVersionCurrentReplica (Just (ovid, c1)) (Just c2) = if (c1 == c2) then ovid else vid
-    calVersionCurrentReplica _ _ = error "not impossible"
-
-    findFileLocalVersion :: FilePath -> Maybe (Version, Hash)
-    findFileLocalVersion f = (,) <$> vis Map.!? (f, rid) <*> fis Map.!? f
-
-    findFileOtherVersion :: FilePath -> [((FilePath, ReplicaId), Version)]
-    findFileOtherVersion f = filter (\((f',rid'), _) -> f == f' && rid /= rid') (Map.assocs vis)
-
-    calVersionInfo :: FilePath -> [((FilePath,ReplicaId),Version)]
-    calVersionInfo f = ((f,rid), calVersionCurrentReplica (findFileLocalVersion f) (nfis Map.!? f)) : (findFileOtherVersion f)
-    finalVis :: Map.Map (FilePath, ReplicaId) Version
-    finalVis = Map.fromList (join $ map (\f -> calVersionInfo f) (nub $ Map.keys nfis ++ Map.keys fis))
+    allFs = (Map.keys fis) ++ (Map.keys nfis)
+    changeFs = filter (\f -> fis Map.!? f /= nfis Map.!? f) allFs
+    finalVis = foldl' (\m f -> Map.insert (f,rid) vid m) vis changeFs
 
 syncLocalDb :: FilePath -> IO (Database, FileContent)
 syncLocalDb dir = do db <- localDatabase dir

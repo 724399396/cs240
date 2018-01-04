@@ -52,6 +52,11 @@ main = hspec $ describe "Testing Lab 3" $ do
       let ndb = mergeLocalInfo localDb localOriginFileInfo
       ndb `shouldBe` localDb
 
+    it "keep version info and file info not change when file is sync from server" $ do
+      let db = Database lrid currentVersion (Map.fromList [((file1, orid), versionForOtherFile1)]) (Map.fromList [(file1, file1Hash)])
+          ndb = mergeLocalInfo db (Map.fromList [(file1, file1Hash)])
+      ndb `shouldBe` db
+
     it "increase current replica version and keep other replica version when old file change" $ do
       let newHash = Hash "newHash"
           newFileInfo = Map.fromList [(file1, newHash)
