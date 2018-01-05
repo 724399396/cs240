@@ -166,8 +166,8 @@ syncFileFromServer fc dir (Database lrid lvid _ _) (Database orid ovid _ _) chan
     readFromServer fileName = fc Map.! fileName
     deleteFile :: FilePath -> IO ()
     deleteFile fileName = do
-      hPutStrLn stderr $ "fetching \"" ++ fileName ++ "\""
-      removeFile fileName
+      hPutStrLn stderr $ "deleting \"" ++ fileName ++ "\""
+      removeFile (dir </> fileName)
     downloadFile :: FilePath -> IO ()
     downloadFile fileName = do
       hPutStrLn stderr $ "fetching \"" ++ fileName ++ "\""
